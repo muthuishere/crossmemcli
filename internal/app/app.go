@@ -57,21 +57,24 @@ Examples:
   crossmem scan --json
 `
 
-const listHelpText = `Usage: crossmem list [options]
+const listHelpText = `Usage: crossmem list [options] [folder]
 
-List available local sessions. Use --folder to focus on sessions tied to one repo.
+List available local sessions, most recent first. Pass a folder (positional or
+--folder) to show only sessions whose real working directory is that folder,
+across all tools — useful for picking which recent session to load.
 
 Options:
   --provider <name>                       claude, codex, copilot, devin, or all (default: all)
-  --folder <path>                         only show sessions matching a folder or workspace hint
+  --folder <path>                         only show sessions whose working directory is this folder
   --limit <number>                        maximum sessions to print (default: 50)
   --json                                  print sessions as JSON
   -h, --help                              display help for command
 
 Examples:
+  crossmem list --limit 5                   # 5 most recent sessions across all tools
+  crossmem list . --limit 5                 # 5 most recent sessions for THIS folder
   crossmem list --provider claude --limit 20
-  crossmem list --provider devin --limit 10
-  crossmem list --folder /path/to/repo --json
+  crossmem list /path/to/repo --json
 `
 
 const loadHelpText = `Usage: crossmem load [options] [folder]
@@ -83,11 +86,18 @@ to summarize or request more context.
 Options:
   --provider <name>                       claude, codex, copilot, devin, or all (default: all)
   --limit <number>                        maximum sessions to include (default: 10)
+  --full                                  emit fuller per-session excerpts instead of the compact summary
+  --session <ref>                         load one specific session by its handle from list
+                                          (a transcript path, or devin:<id>)
   --out <file>                            write bundle to file instead of stdout
   -h, --help                              display help for command
 
 Examples:
   crossmem load .
+  crossmem load . --limit 1                 # latest session for this folder (summary)
+  crossmem load . --limit 1 --full          # latest session, fuller excerpt
+  crossmem load --session /path/to/session.jsonl --full   # one chosen session
+  crossmem load --session devin:1a2b3c --full             # a chosen Devin session
   crossmem load /path/to/repo --provider codex --limit 5
   crossmem load . --out .crossmem/context.md
 `
@@ -322,6 +332,7 @@ func runList(args []string, stdout io.Writer) error {
 		_, _ = fmt.Fprint(stdout, listHelpText)
 		return nil
 	}
+	args, positional := extractPositionalFolder(args)
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	provider := fs.String("provider", "all", "provider")
@@ -331,9 +342,15 @@ func runList(args []string, stdout io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// A folder (positional or --folder) scopes the listing to sessions whose
+	// real working directory is that folder, across all tools.
+	cwd := positional
+	if cwd == "" {
+		cwd = *folder
+	}
 	sessions, err := providers.ListSessions(providers.ListOptions{
 		Provider: *provider,
-		Folder:   *folder,
+		CWD:      cwd,
 		Limit:    *limit,
 	})
 	if err != nil {
@@ -343,7 +360,7 @@ func runList(args []string, stdout io.Writer) error {
 		return writeJSON(stdout, sessions)
 	}
 	for _, session := range sessions {
-		fmt.Fprintf(stdout, "%s %-7s %9d %s\n", session.Modified.Format("2006-01-02T15:04:05Z07:00"), session.Provider, session.Bytes, session.Path)
+		fmt.Fprintf(stdout, "%s %-7s %9d %s\n", session.Modified.Format("2006-01-02T15:04:05Z07:00"), session.Provider, session.Bytes, session.Ref)
 		if session.Workspace != "" {
 			fmt.Fprintf(stdout, "  workspace: %s\n", session.Workspace)
 		}
@@ -365,6 +382,8 @@ func runLoad(args []string, stdout io.Writer) error {
 	provider := fs.String("provider", "all", "provider")
 	limit := fs.Int("limit", 10, "limit")
 	out := fs.String("out", "", "output file")
+	full := fs.Bool("full", false, "emit fuller per-session excerpts instead of the compact summary")
+	session := fs.String("session", "", "load one specific session transcript by path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -375,11 +394,18 @@ func runLoad(args []string, stdout io.Writer) error {
 	if cwd == "" {
 		cwd = folder
 	}
-	bundle, err := providers.BuildContext(providers.ListOptions{
-		Provider: *provider,
-		CWD:      cwd,
-		Limit:    *limit,
-	})
+	var bundle string
+	var err error
+	if *session != "" {
+		bundle, err = providers.BuildSessionContext(*session, cwd, *full)
+	} else {
+		bundle, err = providers.BuildContext(providers.ListOptions{
+			Provider: *provider,
+			CWD:      cwd,
+			Limit:    *limit,
+			Full:     *full,
+		})
+	}
 	if err != nil {
 		return err
 	}

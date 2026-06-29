@@ -21,35 +21,58 @@ go install github.com/muthuishere/crossmemcli/cmd/crossmem@latest   # Go
 brew install muthuishere/tap/crossmem                               # Homebrew
 ```
 
+## Resume across tools
+
+The core flow: Codex hits its usage limit, you reopen the **same folder** in Claude
+Code, and pick up where you left off.
+
+```sh
+# 1. From the folder, load the latest session for it (summary by default)
+crossmem load . --limit 1
+
+# 2. Prefer to choose? List the recent sessions for THIS folder, newest first
+crossmem list . --limit 5
+#   2026-06-29T14:27  codex   /Users/you/.codex/sessions/.../rollout-….jsonl
+#   2026-06-29T04:10  devin   devin:narrow-action
+#   2026-06-28T21:02  claude  /Users/you/.claude/projects/.../<id>.jsonl
+
+# 3. Load the one you picked, by the handle in the last column
+crossmem load --session <handle>            # e.g. a .jsonl path, or devin:<id>
+crossmem load --session <handle> --full     # fuller excerpt instead of the summary
+```
+
+`crossmem` matches a session to a folder by the **real working directory** recorded
+in each transcript — so it works even when the folder name contains a dash, and
+across every tool. The handle from `list` is uniform (`--session` takes a transcript
+path or `devin:<id>`), so loading is the same whether the session lived in a JSONL
+file or a SQLite database.
+
+**summary vs full** — by default `load` emits a compact, summary-friendly excerpt per
+session; add `--full` for a larger, more verbatim excerpt.
+
 ## Usage
 
 ```sh
 crossmem scan                                  # discover known local context stores
-crossmem list --provider claude --limit 20     # list recent sessions
-crossmem list --provider devin --limit 10
-crossmem load .                                # print a portable context bundle for this repo
-crossmem load . --provider codex --out .crossmem/context.md
+crossmem list . --limit 5                      # recent sessions for THIS folder
+crossmem list --provider claude --limit 20     # recent Claude sessions everywhere
+crossmem load .                                # portable context bundle for this repo
+crossmem load --session <handle> --full        # one chosen session, fuller excerpt
 crossmem update .                              # write durable .crossmem/ context files
 ```
 
-Every command has built-in help:
-
-```sh
-crossmem --version
-crossmem help load
-crossmem help scan
-```
+Every command has built-in help: `crossmem help load`, `crossmem --version`.
 
 ### Commands
 
 | Command | What it does |
 | --- | --- |
 | `scan` | Discover known local stores without reading transcript contents. |
-| `list` / `sessions` | List available sessions across stores; filter with `--provider` / `--folder`. |
-| `load` / `context` | Print a portable context bundle for a repo or folder. |
+| `list` / `sessions` | List recent sessions; pass a folder to scope to it, or filter with `--provider`. |
+| `load` / `context` | Print a context bundle for a folder, or one session via `--session`; `--full` for more. |
 | `update` | Write durable `<folder>/.crossmem/` files (`context.md`, `guardrails.md`, `sessions.json`, `sources.json`). |
 | `guardrails` | Print the repo instruction files an agent should read first. |
-| `install --skills` | Install the optional global `crossmem-loader` skill. |
+| `install --skills` | Install the optional global `crossmem-loader` skill that drives this flow. |
 
 ## Local stores
 
@@ -62,14 +85,14 @@ crossmem help scan
 | Copilot (VS Code) | `~/Library/Application Support/Code/User/workspaceStorage/<id>/.../*.jsonl` |
 | Devin CLI | `~/.local/share/devin/cli/sessions.db` (SQLite) |
 
-## Context bundles & guardrails
+## Bundles & guardrails
 
-`crossmem load .` prints a bundle; `crossmem update .` writes it durably under `.crossmem/`. A bundle separates two things on purpose:
+`crossmem load` prints a bundle; `crossmem update .` writes it durably under `.crossmem/`. A bundle separates two things on purpose:
 
 - **Guardrails** — repo instruction files (`AGENTS.md`, `CLAUDE.md`, `.agents/AGENTS.md`, `.claude/CLAUDE.md`) treated as *authoritative instructions*.
-- **History** — recent session previews, treated as *context only*.
+- **History** — recent session excerpts, treated as *context only*.
 
-Summarization is intentionally left to the consuming agent (or the `crossmem-loader` skill), since different tasks need different amounts of history.
+How much to summarize is left to the consuming agent (or the `crossmem-loader` skill), since different tasks need different amounts of history.
 
 ## Safety
 

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,13 +40,7 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 		}
 	}
 
-	roots := []string{}
-	if opts.Folder != "" {
-		roots = []string{expandHome(opts.Folder)}
-	} else {
-		roots = providerRoots(opts.Provider)
-	}
-	for _, root := range roots {
+	for _, root := range providerRoots(opts.Provider) {
 		jsonl, err := listJSONL(root, opts.Provider)
 		if err != nil {
 			diag.Debugf("list jsonl root=%q provider=%s err=%q", root, opts.Provider, err)
@@ -68,7 +64,10 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 func filterByCWD(sessions []Session, cwd string) []Session {
 	filtered := make([]Session, 0, len(sessions))
 	for _, session := range sessions {
-		if sameOrChild(session.Workspace, cwd) || sameOrChild(session.Title, cwd) {
+		// Match on the real working directory only. The session belongs to the
+		// target folder when its cwd is that folder or sits under it. Titles are
+		// human sentences, not paths, so they are never used for matching.
+		if sameOrChild(session.Workspace, cwd) {
 			filtered = append(filtered, session)
 		}
 	}
@@ -92,13 +91,18 @@ func listJSONL(root string, provider string) ([]Session, error) {
 		if err != nil {
 			return nil
 		}
-		title := readJSONLTitle(path, inferred)
+		title, cwd := readJSONLMeta(path, inferred)
+		workspace := cwd
+		if workspace == "" {
+			workspace = inferWorkspace(path, inferred)
+		}
 		sessions = append(sessions, Session{
 			Provider:  inferred,
+			Ref:       path,
 			Path:      path,
 			Bytes:     info.Size(),
 			Modified:  info.ModTime(),
-			Workspace: inferWorkspace(path, inferred),
+			Workspace: workspace,
 			Title:     title,
 		})
 		return nil
@@ -106,40 +110,55 @@ func listJSONL(root string, provider string) ([]Session, error) {
 	return sessions, err
 }
 
-func readJSONLTitle(path string, provider string) string {
-	file, err := withRetry("open jsonl title "+path, func() (*os.File, error) {
+// readJSONLMeta scans the head of a transcript for a human title and the real
+// working directory the session ran in. The cwd is the reliable key for
+// matching a session to a folder; the encoded store path is lossy when a real
+// folder name contains a dash (e.g. "crossmem-workspace").
+func readJSONLMeta(path string, provider string) (title string, cwd string) {
+	file, err := withRetry("open jsonl meta "+path, func() (*os.File, error) {
 		return os.Open(path)
 	})
 	if err != nil {
-		diag.Debugf("read title path=%q provider=%s err=%q", path, provider, err)
-		return ""
+		diag.Debugf("read meta path=%q provider=%s err=%q", path, provider, err)
+		return "", ""
 	}
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	for i := 0; i < 12 && scanner.Scan(); i++ {
+	for i := 0; i < 60 && scanner.Scan(); i++ {
 		var obj map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &obj); err != nil {
 			continue
 		}
 		switch provider {
 		case "claude":
-			if value, ok := obj["aiTitle"].(string); ok {
-				return value
+			if cwd == "" {
+				if value, ok := obj["cwd"].(string); ok && value != "" {
+					cwd = value
+				}
 			}
-			if value, ok := obj["summary"].(string); ok {
-				return value
+			if title == "" {
+				if value, ok := obj["aiTitle"].(string); ok && value != "" {
+					title = value
+				} else if value, ok := obj["summary"].(string); ok && value != "" {
+					title = value
+				}
 			}
 		case "codex":
 			if payload, ok := obj["payload"].(map[string]any); ok {
-				if value, ok := payload["cwd"].(string); ok {
-					return value
+				if cwd == "" {
+					if value, ok := payload["cwd"].(string); ok && value != "" {
+						cwd = value
+					}
 				}
 			}
 		}
+		if cwd != "" && title != "" {
+			break
+		}
 	}
-	return ""
+	return title, cwd
 }
 
 func listDevin(limit int, cwdFilter string) ([]Session, error) {
@@ -175,6 +194,7 @@ func listDevin(limit int, cwdFilter string) ([]Session, error) {
 		session := Session{
 			Provider:  "devin",
 			ID:        id,
+			Ref:       "devin:" + id,
 			Path:      dbPath,
 			Bytes:     info.Size(),
 			Modified:  unixFlexible(last),
@@ -189,18 +209,52 @@ func listDevin(limit int, cwdFilter string) ([]Session, error) {
 	return sessions, rows.Err()
 }
 
+// loadDevinSession fetches one Devin session by id for load --session devin:<id>.
+func loadDevinSession(id string) (Session, error) {
+	dbPath := expandHome("~/.local/share/devin/cli/sessions.db")
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		return Session{}, err
+	}
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(250)")
+	if err != nil {
+		return Session{}, err
+	}
+	defer db.Close()
+
+	row := db.QueryRow(`select title, working_directory, backend_type, model, agent_mode, last_activity_at from sessions where id = ?`, id)
+	var title, workingDirectory, backend, model, mode string
+	var last int64
+	if err := row.Scan(&title, &workingDirectory, &backend, &model, &mode, &last); err != nil {
+		return Session{}, fmt.Errorf("devin session %q: %w", id, err)
+	}
+	if title == "" {
+		title = strings.Trim(strings.Join([]string{backend, model, mode}, "/"), "/")
+	}
+	return Session{
+		Provider:  "devin",
+		ID:        id,
+		Ref:       "devin:" + id,
+		Path:      dbPath,
+		Bytes:     info.Size(),
+		Modified:  unixFlexible(last),
+		Workspace: workingDirectory,
+		Title:     title,
+	}, nil
+}
+
+// sameOrChild reports whether value is the same path as root or nested under
+// it. Both must be absolute (after ~ expansion); relative inputs return false
+// rather than being resolved against the process working directory, which would
+// make any non-path string spuriously match.
 func sameOrChild(value string, root string) bool {
-	if value == "" || root == "" {
+	value = expandHome(value)
+	root = expandHome(root)
+	if !filepath.IsAbs(value) || !filepath.IsAbs(root) {
 		return false
 	}
-	valueAbs, err := filepath.Abs(expandHome(value))
-	if err != nil {
-		valueAbs = value
-	}
-	rootAbs, err := filepath.Abs(expandHome(root))
-	if err != nil {
-		rootAbs = root
-	}
+	valueAbs := filepath.Clean(value)
+	rootAbs := filepath.Clean(root)
 	if valueAbs == rootAbs {
 		return true
 	}
@@ -239,8 +293,30 @@ func inferWorkspace(path string, provider string) string {
 		parts := strings.Split(path, "/workspaceStorage/")
 		if len(parts) == 2 {
 			id := strings.Split(parts[1], "/")[0]
-			return filepath.Join(parts[0], "workspaceStorage", id, "workspace.json")
+			wsFile := filepath.Join(parts[0], "workspaceStorage", id, "workspace.json")
+			return readCopilotFolder(wsFile)
 		}
 	}
 	return ""
+}
+
+// readCopilotFolder resolves the real project folder for a VS Code Copilot
+// session from its workspace.json ({"folder": "file:///abs/path"}), so sessions
+// match a folder the same way Claude/Codex/Devin do. Returns "" if unavailable.
+func readCopilotFolder(wsFile string) string {
+	data, err := os.ReadFile(wsFile)
+	if err != nil {
+		return ""
+	}
+	var ws struct {
+		Folder string `json:"folder"`
+	}
+	if err := json.Unmarshal(data, &ws); err != nil || ws.Folder == "" {
+		return ""
+	}
+	uri := strings.TrimPrefix(ws.Folder, "file://")
+	if decoded, err := url.PathUnescape(uri); err == nil {
+		return decoded
+	}
+	return uri
 }

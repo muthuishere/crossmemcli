@@ -6,38 +6,99 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
-const maxPreviewChars = 1800
+const (
+	// summaryPreviewChars is the default compact excerpt per session — enough
+	// for an agent to summarize. fullPreviewChars is the larger excerpt emitted
+	// with --full when the user wants fuller context loaded verbatim.
+	summaryPreviewChars = 1800
+	fullPreviewChars    = 24000
+	summaryPreviewLines = 180
+	fullPreviewLines    = 2000
+)
 
 func BuildContext(opts ListOptions) (string, error) {
 	sessions, err := ListSessions(opts)
 	if err != nil {
 		return "", err
 	}
+	return renderBundle(sessions, opts), nil
+}
+
+// BuildSessionContext renders a bundle for one specific session the user picked
+// (e.g. from a "choose from the last 5" list), instead of every session matching
+// the folder. ref is the uniform handle from list: a transcript file path for
+// the JSONL tools, or "devin:<id>" for the SQLite-backed Devin store. cwd is
+// used only to attach the repo's active instructions to the bundle.
+func BuildSessionContext(ref string, cwd string, full bool) (string, error) {
+	if id, ok := strings.CutPrefix(ref, "devin:"); ok {
+		session, err := loadDevinSession(id)
+		if err != nil {
+			return "", err
+		}
+		return renderBundle([]Session{session}, ListOptions{Provider: "devin", CWD: cwd, Full: full}), nil
+	}
+
+	abs, err := filepath.Abs(expandHome(ref))
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	provider := inferProvider(abs, "")
+	if provider == "unknown" {
+		return "", fmt.Errorf("unrecognized session path: %s", abs)
+	}
+	title, scwd := readJSONLMeta(abs, provider)
+	workspace := scwd
+	if workspace == "" {
+		workspace = inferWorkspace(abs, provider)
+	}
+	session := Session{
+		Provider:  provider,
+		Path:      abs,
+		Bytes:     info.Size(),
+		Modified:  info.ModTime(),
+		Workspace: workspace,
+		Title:     title,
+	}
+	return renderBundle([]Session{session}, ListOptions{Provider: provider, CWD: cwd, Full: full}), nil
+}
+
+func renderBundle(sessions []Session, opts ListOptions) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# CrossMem Context Bundle\n\n")
 	fmt.Fprintf(&b, "Generated: %s\n", time.Now().UTC().Format(time.RFC3339))
 	fmt.Fprintf(&b, "Provider: %s\n", providerOrAll(opts.Provider))
-	if opts.Folder != "" {
-		fmt.Fprintf(&b, "Folder: %s\n", expandHome(opts.Folder))
-	} else if opts.CWD != "" {
+	if opts.CWD != "" {
 		fmt.Fprintf(&b, "Folder: %s\n", expandHome(opts.CWD))
 	} else {
 		fmt.Fprintf(&b, "Folder: auto-discovered\n")
 	}
+	mode := "summary"
+	if opts.Full {
+		mode = "full"
+	}
+	fmt.Fprintf(&b, "Mode: %s\n", mode)
 	fmt.Fprintf(&b, "Sessions: %d\n\n", len(sessions))
 
-	guardrailsFolder := opts.CWD
-	if guardrailsFolder == "" {
-		guardrailsFolder = opts.Folder
+	previewChars := summaryPreviewChars
+	previewLines := summaryPreviewLines
+	if opts.Full {
+		previewChars = fullPreviewChars
+		previewLines = fullPreviewLines
 	}
-	if guardrailsFolder != "" {
-		if guardrails, err := BuildGuardrails(guardrailsFolder); err == nil && !strings.Contains(guardrails, "No repo instruction files found") {
+
+	if opts.CWD != "" {
+		if guardrails, err := BuildGuardrails(opts.CWD); err == nil && !strings.Contains(guardrails, "No repo instruction files found") {
 			fmt.Fprintln(&b, strings.TrimSpace(guardrails))
 			fmt.Fprintln(&b)
 		}
@@ -46,9 +107,9 @@ func BuildContext(opts ListOptions) (string, error) {
 	for _, session := range sessions {
 		preview := ""
 		if session.Provider == "devin" {
-			preview = devinPreview(session.ID)
+			preview = devinPreview(session.ID, previewChars)
 		} else {
-			preview = jsonlPreview(session.Path, session.Provider)
+			preview = jsonlPreview(session.Path, session.Provider, previewChars, previewLines)
 		}
 		fmt.Fprintf(&b, "## %s: %s\n\n", session.Provider, titleOrBase(session))
 		fmt.Fprintf(&b, "- Path: `%s`\n", session.Path)
@@ -65,7 +126,7 @@ func BuildContext(opts ListOptions) (string, error) {
 		}
 		fmt.Fprintln(&b)
 	}
-	return strings.TrimSpace(b.String()) + "\n", nil
+	return strings.TrimSpace(b.String()) + "\n"
 }
 
 func providerOrAll(provider string) string {
@@ -85,7 +146,7 @@ func titleOrBase(session Session) string {
 	return session.Path
 }
 
-func jsonlPreview(path string, provider string) string {
+func jsonlPreview(path string, provider string, maxChars int, maxLines int) string {
 	file, err := withRetry("open jsonl preview "+path, func() (*os.File, error) {
 		return os.Open(path)
 	})
@@ -95,12 +156,12 @@ func jsonlPreview(path string, provider string) string {
 	}
 	defer file.Close()
 
-	ring := make([]string, 0, 180)
+	ring := make([]string, 0, maxLines)
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if len(ring) == 180 {
+		if len(ring) == maxLines {
 			copy(ring, ring[1:])
 			ring[len(ring)-1] = line
 		} else {
@@ -115,11 +176,11 @@ func jsonlPreview(path string, provider string) string {
 			continue
 		}
 		chunks = append(chunks, text)
-		if len(strings.Join(chunks, "\n\n")) > maxPreviewChars {
+		if len(strings.Join(chunks, "\n\n")) > maxChars {
 			break
 		}
 	}
-	return truncate(strings.Join(chunks, "\n\n"), maxPreviewChars)
+	return truncate(strings.Join(chunks, "\n\n"), maxChars)
 }
 
 func extractJSONLText(raw []byte, provider string) string {
@@ -196,7 +257,7 @@ func extractCopilot(obj map[string]any) string {
 	return strings.Join(chunks, "\n")
 }
 
-func devinPreview(sessionID string) string {
+func devinPreview(sessionID string, maxChars int) string {
 	if sessionID == "" {
 		return ""
 	}
@@ -234,7 +295,7 @@ func devinPreview(sessionID string) string {
 		seen[text] = true
 		chunks = append(chunks, text)
 	}
-	return truncate(strings.Join(chunks, "\n\n"), maxPreviewChars)
+	return truncate(strings.Join(chunks, "\n\n"), maxChars)
 }
 
 func extractDevin(raw string) string {

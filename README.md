@@ -28,25 +28,51 @@ The npm package is a thin launcher that resolves a prebuilt platform package, fo
 brew install muthuishere/tap/crossmem
 ```
 
+## Resume across tools
+
+The core flow: one tool (say Codex) hits its usage limit, you reopen the **same
+folder** in another (say Claude Code), and pick up where you left off.
+
+```sh
+# 1. From the folder, load its latest session (summary by default)
+crossmem load . --limit 1
+
+# 2. Prefer to choose? List recent sessions for THIS folder, newest first
+crossmem list . --limit 5
+#   2026-06-29T14:27  codex   /Users/you/.codex/sessions/.../rollout-….jsonl
+#   2026-06-29T04:10  devin   devin:narrow-action
+#   2026-06-28T21:02  claude  /Users/you/.claude/projects/.../<id>.jsonl
+
+# 3. Load the one you picked, by the handle in the last column
+crossmem load --session <handle>            # a .jsonl path, or devin:<id>
+crossmem load --session <handle> --full     # fuller excerpt instead of the summary
+```
+
+`crossmem` matches a session to a folder by the **real working directory** recorded
+in each transcript — so it works even when the folder name contains a dash, and
+across every tool. The handle from `list` is uniform (`--session` accepts a
+transcript path or `devin:<id>`), so loading is identical whether the session lived
+in a JSONL file or a SQLite database. By default `load` emits a compact,
+summary-friendly excerpt; add `--full` for a larger, more verbatim one.
+
 ## Usage
 
 ```sh
-crossmem scan
-crossmem list --provider claude --limit 20
-crossmem list --provider devin --limit 10
-crossmem load . --limit 5
+crossmem scan                                  # discover known local context stores
+crossmem list . --limit 5                      # recent sessions for THIS folder
+crossmem list --provider claude --limit 20     # recent Claude sessions everywhere
+crossmem load .                                # context bundle for this repo
+crossmem load --session <handle> --full        # one chosen session, fuller excerpt
 crossmem load . --provider codex --out .crossmem/context.md
-crossmem update .
-crossmem help load
+crossmem update .                              # write durable .crossmem/ files
 ```
 
 Use command help for the full option set:
 
 ```sh
 crossmem --version
-crossmem help scan
+crossmem help load
 crossmem help list
-crossmem help update
 ```
 
 ## Local Stores
