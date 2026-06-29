@@ -1,0 +1,13 @@
+{
+  "name": "@muthuishere/crossmem-linux-arm64",
+  "version": "0.1.0",
+  "description": "crossmem prebuilt binary for linux-arm64",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/muthuishere/crossmemcli.git"
+  },
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "files": ["bin/"]
+}

@@ -1,0 +1,49 @@
+version: 2
+
+project_name: crossmem
+
+builds:
+  - id: crossmem
+    main: ./cmd/crossmem
+    binary: crossmem
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    hooks:
+      post:
+        - sh -c 'mkdir -p npm/platforms/{{ .Os }}-{{ if eq .Arch "amd64" }}x64{{ else }}{{ .Arch }}{{ end }}/bin'
+        - sh -c 'cp "{{ .Path }}" "npm/platforms/{{ .Os }}-{{ if eq .Arch "amd64" }}x64{{ else }}{{ .Arch }}{{ end }}/bin/{{ if eq .Os "windows" }}crossmem.exe{{ else }}crossmem{{ end }}"'
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+brews:
+  - name: crossmem
+    repository:
+      owner: muthuishere
+      name: homebrew-tap
+    homepage: https://github.com/muthuishere/crossmemcli
+    description: Portable context memory across local agent tools.
+    license: MIT
+    test: |
+      system "#{bin}/crossmem", "help"
+
+release:
+  github:
+    owner: muthuishere
+    name: crossmemcli

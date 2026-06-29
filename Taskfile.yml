@@ -1,0 +1,27 @@
+version: '3'
+
+tasks:
+  build:
+    desc: Build the CLI binary for the current platform
+    cmds:
+      - go build -o bin/crossmem ./cmd/crossmem
+
+  test:
+    desc: Run Go tests
+    cmds:
+      - go test ./...
+
+  lint:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  snapshot:
+    desc: Build a local multi-platform snapshot
+    cmds:
+      - goreleaser release --snapshot --clean --skip=publish
+
+  release:dry-run:
+    desc: Dry-run GoReleaser
+    cmds:
+      - goreleaser release --snapshot --clean --skip=publish --verbose
