@@ -1,4 +1,4 @@
-bin/
+/bin/
 dist/
 node_modules/
 npm-debug.log*
@@ -7,3 +7,5 @@ npm-debug.log*
 .crossmem/
 context.md
 *.context.md
+/.agents/
+/.claude/

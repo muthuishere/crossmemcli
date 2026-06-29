@@ -34,6 +34,7 @@ crossmem list --provider claude --limit 20
 crossmem list --provider devin --limit 10
 crossmem load . --limit 5
 crossmem load . --provider codex --out .crossmem/context.md
+crossmem update .
 crossmem skills install
 ```
 
@@ -59,11 +60,50 @@ crossmem skills install
 
 ## Skills
 
+Repo-local activation:
+
 ```sh
 crossmem skills install
 ```
 
 This installs the bundled `crossmem-loader` skill into:
 
-- `~/.claude/skills/crossmem-loader`
-- `~/.agents/skills/crossmem-loader`
+- `./.agents/skills/crossmem-loader`
+
+Global/cross-agent activation should use the skills installer instead of `crossmem` writing into every global tool directory:
+
+```sh
+npx skills install muthuishere/crossmemcli/skills/crossmem-loader
+```
+
+If you prefer a user-local source folder, keep a copy under something like:
+
+```text
+~/local/crossmem-loader/<project-or-version>/
+```
+
+Then link or install that folder through your agent/skills installer.
+
+## Context Update
+
+`crossmem load .` prints a context bundle. `crossmem update .` writes the durable local context files:
+
+```text
+.crossmem/
+  context.md
+  guardrails.md
+  summary.md
+  sources.json
+  sessions.json
+```
+
+Guardrails are gathered from repo-local instruction files first:
+
+```text
+AGENTS.md
+CLAUDE.md
+.agents/AGENTS.md
+.claude/CLAUDE.md
+```
+
+The loader skill should treat guardrails as constraints, not normal historical context.

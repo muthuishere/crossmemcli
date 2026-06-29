@@ -18,13 +18,15 @@ type InstallResult struct {
 }
 
 func Install() ([]InstallResult, error) {
-	home := os.Getenv("HOME")
 	targets := []string{
-		filepath.Join(home, ".claude", "skills", "crossmem-loader"),
-		filepath.Join(home, ".agents", "skills", "crossmem-loader"),
+		filepath.Join(".", ".agents", "skills", "crossmem-loader"),
 	}
 	results := make([]InstallResult, 0, len(targets))
 	for _, target := range targets {
+		target, err := filepath.Abs(target)
+		if err != nil {
+			return nil, err
+		}
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return nil, err
 		}

@@ -21,6 +21,8 @@ Usage:
   crossmem list [--provider claude|codex|copilot|devin|all] [--folder PATH] [--limit N] [--json]
   crossmem load [FOLDER] [--provider claude|codex|copilot|devin|all] [--limit N] [--out FILE]
   crossmem context [same flags as load]
+  crossmem guardrails [FOLDER]
+  crossmem update [FOLDER] [--provider claude|codex|copilot|devin|all] [--limit N]
   crossmem skills install
 
 Examples:
@@ -42,11 +44,54 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) error {
 		return runList(args[1:], stdout)
 	case "load", "context":
 		return runLoad(args[1:], stdout)
+	case "guardrails":
+		return runGuardrails(args[1:], stdout)
+	case "update":
+		return runUpdate(args[1:], stdout)
 	case "skills":
 		return runSkills(args[1:], stdout)
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], helpText)
 	}
+}
+
+func runGuardrails(args []string, stdout io.Writer) error {
+	folder := "."
+	if len(args) > 0 {
+		folder = args[0]
+	}
+	text, err := providers.BuildGuardrails(folder)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprint(stdout, text)
+	return err
+}
+
+func runUpdate(args []string, stdout io.Writer) error {
+	args, cwd := extractPositionalFolder(args)
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	provider := fs.String("provider", "all", "provider")
+	limit := fs.Int("limit", 10, "limit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if cwd == "" {
+		cwd = "."
+	}
+	result, err := providers.UpdateContext(providers.ListOptions{
+		Provider: *provider,
+		CWD:      cwd,
+		Limit:    *limit,
+	})
+	if err != nil {
+		return err
+	}
+	for _, path := range result.Paths {
+		fmt.Fprintf(stdout, "Wrote %s\n", path)
+	}
+	return nil
 }
 
 func runScan(args []string, stdout io.Writer) error {

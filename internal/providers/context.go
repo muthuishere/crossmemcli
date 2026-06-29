@@ -28,6 +28,17 @@ func BuildContext(opts ListOptions) (string, error) {
 	}
 	fmt.Fprintf(&b, "Sessions: %d\n\n", len(sessions))
 
+	guardrailsFolder := opts.CWD
+	if guardrailsFolder == "" {
+		guardrailsFolder = opts.Folder
+	}
+	if guardrailsFolder != "" {
+		if guardrails, err := BuildGuardrails(guardrailsFolder); err == nil && !strings.Contains(guardrails, "No repo guardrail files found") {
+			fmt.Fprintln(&b, strings.TrimSpace(guardrails))
+			fmt.Fprintln(&b)
+		}
+	}
+
 	for _, session := range sessions {
 		preview := ""
 		if session.Provider == "devin" {
