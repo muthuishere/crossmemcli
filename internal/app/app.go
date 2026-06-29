@@ -26,7 +26,6 @@ Usage:
   crossmem update [FOLDER] [--provider claude|codex|copilot|devin|all] [--limit N]
   crossmem install --skills [--agents]
   crossmem uninstall --skills [--agents]
-  crossmem skills <install|uninstall> [--agents]   (alias)
 
 Examples:
   crossmem scan
@@ -55,8 +54,6 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) error {
 		return runTopLevelSkillAction("install", args[1:], stdout, stderr)
 	case "uninstall":
 		return runTopLevelSkillAction("uninstall", args[1:], stdout, stderr)
-	case "skills":
-		return runSkills(args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], helpText)
 	}
@@ -242,26 +239,6 @@ func runTopLevelSkillAction(verb string, args []string, stdout io.Writer, stderr
 		return fmt.Errorf("crossmem %s: unexpected arguments: %s", verb, strings.Join(fs.Args(), " "))
 	}
 	return executeSkillAction(verb, *agents, stdout, stderr)
-}
-
-func runSkills(args []string, stdout io.Writer, stderr io.Writer) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: crossmem skills <install|uninstall> [--agents]")
-	}
-	verb := args[0]
-	if verb != "install" && verb != "uninstall" {
-		return fmt.Errorf("usage: crossmem skills <install|uninstall> [--agents]")
-	}
-	fs := flag.NewFlagSet("skills "+verb, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	agents := fs.Bool("agents", false, "also target ~/.agents/skills even when codex is not on PATH")
-	if err := fs.Parse(args[1:]); err != nil {
-		return fmt.Errorf("crossmem skills %s: %w", verb, err)
-	}
-	if len(fs.Args()) != 0 {
-		return fmt.Errorf("crossmem skills %s: unexpected arguments: %s", verb, strings.Join(fs.Args(), " "))
-	}
-	return executeSkillAction("skills "+verb, *agents, stdout, stderr)
 }
 
 func executeSkillAction(label string, agents bool, stdout io.Writer, stderr io.Writer) error {

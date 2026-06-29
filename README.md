@@ -78,13 +78,6 @@ Pass `--agents` to force the agents target even when `codex` is not on `PATH`:
 crossmem install --skills --agents
 ```
 
-The older command shape remains as an alias:
-
-```sh
-crossmem skills install
-crossmem skills uninstall
-```
-
 `crossmem` does not install repo-local skills by default. The product is a global, cross-repo context layer for Claude Code, Codex, Devin, Copilot, and spawned agent processes that need to ask "what context exists for this folder?".
 
 ## Context Update
