@@ -20,10 +20,13 @@
   "author": "Muthukumaran Navaneethakrishnan",
   "repository": {
     "type": "git",
-    "url": "https://github.com/muthuishere/crossmemcli.git"
+    "url": "git+https://github.com/muthuishere/crossmemcli.git"
   },
   "bin": {
-    "crossmem": "./bin/crossmem.js"
+    "crossmem": "bin/crossmem.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "bin/",

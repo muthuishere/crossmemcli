@@ -4,7 +4,10 @@
   "description": "crossmem prebuilt binary for windows-x64",
   "repository": {
     "type": "git",
-    "url": "https://github.com/muthuishere/crossmemcli.git"
+    "url": "git+https://github.com/muthuishere/crossmemcli.git"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "MIT",
   "os": ["win32"],
