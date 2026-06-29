@@ -86,6 +86,32 @@ Release builds include version metadata:
 crossmem --version
 ```
 
+## npm Trusted Publishing
+
+npm releases are published by `.github/workflows/npm-publish.yml` using GitHub Actions OIDC trusted publishing. The workflow builds all native packages with GoReleaser, publishes the platform packages first, and publishes `@muthuishere/crossmem` last.
+
+Configure the same trusted publisher for every npm package:
+
+```sh
+for package in \
+  @muthuishere/crossmem-darwin-arm64 \
+  @muthuishere/crossmem-darwin-x64 \
+  @muthuishere/crossmem-linux-arm64 \
+  @muthuishere/crossmem-linux-x64 \
+  @muthuishere/crossmem-windows-x64 \
+  @muthuishere/crossmem
+do
+  npm trust github "$package" \
+    --repo muthuishere/crossmemcli \
+    --file npm-publish.yml \
+    --allow-publish \
+    --yes
+  sleep 2
+done
+```
+
+The packages must already exist on npm before running the trust commands. The workflow does not use `NODE_AUTH_TOKEN`; npm exchanges the GitHub OIDC token during `npm publish --provenance`.
+
 ## Skill Install
 
 Optional global skill activation follows the same shape as `windowctl`:
