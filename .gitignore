@@ -1,6 +1,7 @@
 /bin/
 dist/
 node_modules/
+npm/platforms/*/bin/
 npm-debug.log*
 
 .DS_Store

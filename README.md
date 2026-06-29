@@ -43,6 +43,7 @@ crossmem help load
 Use command help for the full option set:
 
 ```sh
+crossmem --version
 crossmem help scan
 crossmem help list
 crossmem help update
@@ -67,6 +68,23 @@ crossmem help update
 - Do not read `*.env`, credential files, auth DBs, or `vault/` directories.
 - Treat env vars with `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, or `_PW` as use-only secrets.
 - Prefer JSONL transcript files and known safe SQLite metadata over auth/config stores.
+
+## Production Notes
+
+`crossmem` does not send telemetry anywhere. Observability is local and opt-in:
+
+```sh
+CROSSMEM_DEBUG=1 crossmem scan
+CROSSMEM_LOG=/tmp/crossmem.log crossmem load . --limit 5
+```
+
+Debug logs include command flow and local read/query failures, but not transcript contents. Local file and SQLite reads use small retries for transient races with active agent writers.
+
+Release builds include version metadata:
+
+```sh
+crossmem --version
+```
 
 ## Skill Install
 

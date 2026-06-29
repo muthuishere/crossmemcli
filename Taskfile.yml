@@ -16,6 +16,15 @@ tasks:
     cmds:
       - go vet ./...
 
+  ci:
+    desc: Run local CI checks
+    cmds:
+      - go test ./...
+      - go vet ./...
+      - go build -o bin/crossmem ./cmd/crossmem
+      - ./bin/crossmem --version
+      - ./bin/crossmem --help
+
   snapshot:
     desc: Build a local multi-platform snapshot
     cmds:

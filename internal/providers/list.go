@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/muthuishere/crossmemcli/internal/diag"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -31,6 +33,8 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 		devin, err := listDevin(opts.Limit, opts.CWD)
 		if err == nil {
 			sessions = append(sessions, devin...)
+		} else {
+			diag.Debugf("list devin err=%q", err)
 		}
 	}
 
@@ -43,6 +47,7 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 	for _, root := range roots {
 		jsonl, err := listJSONL(root, opts.Provider)
 		if err != nil {
+			diag.Debugf("list jsonl root=%q provider=%s err=%q", root, opts.Provider, err)
 			continue
 		}
 		if opts.CWD != "" {
@@ -74,6 +79,9 @@ func listJSONL(root string, provider string) ([]Session, error) {
 	var sessions []Session
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
+			if err != nil {
+				diag.Debugf("list walk path=%q err=%q", path, err)
+			}
 			return nil
 		}
 		inferred := inferProvider(path, provider)
@@ -99,8 +107,11 @@ func listJSONL(root string, provider string) ([]Session, error) {
 }
 
 func readJSONLTitle(path string, provider string) string {
-	file, err := os.Open(path)
+	file, err := withRetry("open jsonl title "+path, func() (*os.File, error) {
+		return os.Open(path)
+	})
 	if err != nil {
+		diag.Debugf("read title path=%q provider=%s err=%q", path, provider, err)
 		return ""
 	}
 	defer file.Close()
@@ -137,13 +148,15 @@ func listDevin(limit int, cwdFilter string) ([]Session, error) {
 	if err != nil {
 		return nil, nil
 	}
-	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(250)")
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
 
-	rows, err := db.Query(`select id, title, working_directory, backend_type, model, agent_mode, last_activity_at from sessions where hidden = 0 order by last_activity_at desc limit ?`, limit)
+	rows, err := withRetry("query devin sessions", func() (*sql.Rows, error) {
+		return db.Query(`select id, title, working_directory, backend_type, model, agent_mode, last_activity_at from sessions where hidden = 0 order by last_activity_at desc limit ?`, limit)
+	})
 	if err != nil {
 		return nil, err
 	}

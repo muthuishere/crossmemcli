@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
 func DiscoverStores() ([]Store, error) {
@@ -12,6 +14,9 @@ func DiscoverStores() ([]Store, error) {
 		path := expandHome(def.Path)
 		info, err := os.Stat(path)
 		store := Store{Provider: def.Provider, Kind: def.Kind, Path: path, Exists: err == nil, Note: def.Note}
+		if err != nil && !os.IsNotExist(err) {
+			diag.Debugf("scan stat provider=%s kind=%s path=%q err=%q", def.Provider, def.Kind, path, err)
+		}
 		if err == nil {
 			size := info.Size()
 			store.Bytes = &size
@@ -31,6 +36,7 @@ func countInteresting(root string) (int, int64) {
 	var bytes int64
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
+			diag.Debugf("scan walk path=%q err=%q", path, err)
 			return nil
 		}
 		if d.IsDir() {

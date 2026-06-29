@@ -8,6 +8,8 @@ builds:
     binary: crossmem
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/muthuishere/crossmemcli/internal/version.Version={{ .Version }} -X github.com/muthuishere/crossmemcli/internal/version.Commit={{ .Commit }} -X github.com/muthuishere/crossmemcli/internal/version.Date={{ .Date }}
     goos:
       - darwin
       - linux
@@ -32,16 +34,22 @@ archives:
 checksum:
   name_template: checksums.txt
 
-brews:
+homebrew_casks:
   - name: crossmem
+    binaries:
+      - crossmem
     repository:
       owner: muthuishere
       name: homebrew-tap
     homepage: https://github.com/muthuishere/crossmemcli
     description: Portable context memory across local agent tools.
     license: MIT
-    test: |
-      system "#{bin}/crossmem", "help"
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/crossmem"]
+          end
 
 release:
   github:

@@ -11,6 +11,7 @@ import (
 
 	"github.com/muthuishere/crossmemcli/internal/providers"
 	"github.com/muthuishere/crossmemcli/internal/skills"
+	"github.com/muthuishere/crossmemcli/internal/version"
 )
 
 const helpText = `Usage: crossmem [options] [command]
@@ -18,6 +19,7 @@ const helpText = `Usage: crossmem [options] [command]
 Portable context memory across local agent tools.
 
 Options:
+  -V, --version                           output the version number
   -h, --help                              display help for command
 
 Commands:
@@ -160,6 +162,10 @@ Examples:
 func Run(args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		_, _ = fmt.Fprint(stdout, helpText)
+		return nil
+	}
+	if args[0] == "version" || args[0] == "--version" || args[0] == "-V" {
+		fmt.Fprintln(stdout, version.String())
 		return nil
 	}
 	if args[0] == "help" {

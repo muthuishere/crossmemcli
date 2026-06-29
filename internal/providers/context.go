@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
 const maxPreviewChars = 1800
@@ -84,8 +86,11 @@ func titleOrBase(session Session) string {
 }
 
 func jsonlPreview(path string, provider string) string {
-	file, err := os.Open(path)
+	file, err := withRetry("open jsonl preview "+path, func() (*os.File, error) {
+		return os.Open(path)
+	})
 	if err != nil {
+		diag.Debugf("jsonl preview path=%q provider=%s err=%q", path, provider, err)
 		return ""
 	}
 	defer file.Close()
@@ -196,14 +201,18 @@ func devinPreview(sessionID string) string {
 		return ""
 	}
 	dbPath := expandHome("~/.local/share/devin/cli/sessions.db")
-	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(250)")
 	if err != nil {
+		diag.Debugf("devin preview open db=%q err=%q", dbPath, err)
 		return ""
 	}
 	defer db.Close()
 
-	rows, err := db.Query(`select chat_message from message_nodes where session_id = ? order by node_id desc limit 24`, sessionID)
+	rows, err := withRetry("query devin preview", func() (*sql.Rows, error) {
+		return db.Query(`select chat_message from message_nodes where session_id = ? order by node_id desc limit 24`, sessionID)
+	})
 	if err != nil {
+		diag.Debugf("devin preview query session=%q err=%q", sessionID, err)
 		return ""
 	}
 	defer rows.Close()
