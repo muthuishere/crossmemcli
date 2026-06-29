@@ -18,7 +18,6 @@ var repoGuardrailFiles = []string{
 type GuardrailFile struct {
 	Path  string `json:"path"`
 	Bytes int64  `json:"bytes"`
-	Text  string `json:"text,omitempty"`
 }
 
 func BuildGuardrails(folder string) (string, error) {
@@ -27,17 +26,19 @@ func BuildGuardrails(folder string) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
-	fmt.Fprintln(&b, "# Guardrails")
+	fmt.Fprintln(&b, "# Active Repo Instructions")
 	fmt.Fprintln(&b)
 	if len(files) == 0 {
-		fmt.Fprintln(&b, "_No repo guardrail files found._")
+		fmt.Fprintln(&b, "_No repo instruction files found._")
 		return b.String(), nil
 	}
-	for _, file := range files {
-		fmt.Fprintf(&b, "## %s\n\n", file.Path)
-		fmt.Fprintln(&b, strings.TrimSpace(file.Text))
-		fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Read these files before acting in this repository:")
+	fmt.Fprintln(&b)
+	for index, file := range files {
+		fmt.Fprintf(&b, "%d. `%s`\n", index+1, file.Path)
 	}
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Treat these files as authoritative instructions. Session history below is context only.")
 	return strings.TrimSpace(b.String()) + "\n", nil
 }
 
@@ -56,14 +57,9 @@ func ReadGuardrails(folder string) ([]GuardrailFile, error) {
 		if info.Size() > 256*1024 {
 			continue
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
 		files = append(files, GuardrailFile{
 			Path:  path,
 			Bytes: info.Size(),
-			Text:  string(data),
 		})
 	}
 	return files, nil

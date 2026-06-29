@@ -35,7 +35,7 @@ crossmem list --provider devin --limit 10
 crossmem load . --limit 5
 crossmem load . --provider codex --out .crossmem/context.md
 crossmem update .
-crossmem skills install
+crossmem install --skills
 ```
 
 ## Local Stores
@@ -58,31 +58,34 @@ crossmem skills install
 - Treat env vars with `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, or `_PW` as use-only secrets.
 - Prefer JSONL transcript files and known safe SQLite metadata over auth/config stores.
 
-## Skills
+## Skill Install
 
-Repo-local activation:
+Global activation follows the same shape as `windowctl`:
+
+```sh
+crossmem install --skills
+crossmem uninstall --skills
+```
+
+This installs the bundled `crossmem-loader` skill globally into:
+
+- `~/.claude/skills/crossmem-loader`
+- `~/.agents/skills/crossmem-loader` when `codex` is on `PATH`
+
+Pass `--agents` to force the agents target even when `codex` is not on `PATH`:
+
+```sh
+crossmem install --skills --agents
+```
+
+The older command shape remains as an alias:
 
 ```sh
 crossmem skills install
+crossmem skills uninstall
 ```
 
-This installs the bundled `crossmem-loader` skill into:
-
-- `./.agents/skills/crossmem-loader`
-
-Global/cross-agent activation should use the skills installer instead of `crossmem` writing into every global tool directory:
-
-```sh
-npx skills install muthuishere/crossmemcli/skills/crossmem-loader
-```
-
-If you prefer a user-local source folder, keep a copy under something like:
-
-```text
-~/local/crossmem-loader/<project-or-version>/
-```
-
-Then link or install that folder through your agent/skills installer.
+`crossmem` does not install repo-local skills by default. The product is a global, cross-repo context layer for Claude Code, Codex, Devin, Copilot, and spawned agent processes that need to ask "what context exists for this folder?".
 
 ## Context Update
 
@@ -92,12 +95,13 @@ Then link or install that folder through your agent/skills installer.
 .crossmem/
   context.md
   guardrails.md
-  summary.md
   sources.json
   sessions.json
 ```
 
-Guardrails are gathered from repo-local instruction files first:
+`context.md` is the portable context bundle. Summarization policy is intentionally left to the consuming agent or the `crossmem-loader` skill, because different agents and tasks need different amounts of history.
+
+Active repo instructions are gathered from repo-local instruction files first:
 
 ```text
 AGENTS.md
@@ -106,4 +110,4 @@ CLAUDE.md
 .claude/CLAUDE.md
 ```
 
-The loader skill should treat guardrails as constraints, not normal historical context.
+The loader skill should tell the agent to read those files as authoritative instructions before using session history.

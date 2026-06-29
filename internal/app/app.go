@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -23,7 +24,9 @@ Usage:
   crossmem context [same flags as load]
   crossmem guardrails [FOLDER]
   crossmem update [FOLDER] [--provider claude|codex|copilot|devin|all] [--limit N]
-  crossmem skills install
+  crossmem install --skills [--agents]
+  crossmem uninstall --skills [--agents]
+  crossmem skills <install|uninstall> [--agents]   (alias)
 
 Examples:
   crossmem scan
@@ -48,8 +51,12 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) error {
 		return runGuardrails(args[1:], stdout)
 	case "update":
 		return runUpdate(args[1:], stdout)
+	case "install":
+		return runTopLevelSkillAction("install", args[1:], stdout, stderr)
+	case "uninstall":
+		return runTopLevelSkillAction("uninstall", args[1:], stdout, stderr)
 	case "skills":
-		return runSkills(args[1:], stdout)
+		return runSkills(args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], helpText)
 	}
@@ -220,16 +227,70 @@ func extractPositionalFolder(args []string) ([]string, string) {
 	return filtered, folder
 }
 
-func runSkills(args []string, stdout io.Writer) error {
-	if len(args) == 0 || args[0] != "install" {
-		return fmt.Errorf("usage: crossmem skills install")
+func runTopLevelSkillAction(verb string, args []string, stdout io.Writer, stderr io.Writer) error {
+	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	skillsFlag := fs.Bool("skills", false, "install or remove the bundled crossmem-loader skill")
+	agents := fs.Bool("agents", false, "also target ~/.agents/skills even when codex is not on PATH")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("crossmem %s: %w", verb, err)
 	}
-	results, err := skills.Install()
+	if !*skillsFlag {
+		return fmt.Errorf("crossmem %s: --skills is required", verb)
+	}
+	if len(fs.Args()) != 0 {
+		return fmt.Errorf("crossmem %s: unexpected arguments: %s", verb, strings.Join(fs.Args(), " "))
+	}
+	return executeSkillAction(verb, *agents, stdout, stderr)
+}
+
+func runSkills(args []string, stdout io.Writer, stderr io.Writer) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: crossmem skills <install|uninstall> [--agents]")
+	}
+	verb := args[0]
+	if verb != "install" && verb != "uninstall" {
+		return fmt.Errorf("usage: crossmem skills <install|uninstall> [--agents]")
+	}
+	fs := flag.NewFlagSet("skills "+verb, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	agents := fs.Bool("agents", false, "also target ~/.agents/skills even when codex is not on PATH")
+	if err := fs.Parse(args[1:]); err != nil {
+		return fmt.Errorf("crossmem skills %s: %w", verb, err)
+	}
+	if len(fs.Args()) != 0 {
+		return fmt.Errorf("crossmem skills %s: unexpected arguments: %s", verb, strings.Join(fs.Args(), " "))
+	}
+	return executeSkillAction("skills "+verb, *agents, stdout, stderr)
+}
+
+func executeSkillAction(label string, agents bool, stdout io.Writer, stderr io.Writer) error {
+	includeAgents := resolveIncludeAgents(agents)
+	var (
+		results []skills.InstallResult
+		err     error
+	)
+	if strings.HasSuffix(label, "uninstall") {
+		results, err = skills.UninstallBundledSkill(skills.InstallOptions{IncludeAgents: includeAgents})
+	} else {
+		results, err = skills.InstallBundledSkill(skills.InstallOptions{IncludeAgents: includeAgents})
+	}
 	if err != nil {
 		return err
 	}
 	for _, result := range results {
-		fmt.Fprintf(stdout, "%s -> %s\n", result.Name, result.Path)
+		fmt.Fprintf(stdout, "%s: %s at %s\n", result.Host, result.Action, result.Path)
+	}
+	if !includeAgents {
+		fmt.Fprintln(stderr, "crossmem: skipped agents skill target because codex was not found on PATH; pass --agents to force it")
 	}
 	return nil
+}
+
+func resolveIncludeAgents(force bool) bool {
+	if force {
+		return true
+	}
+	_, err := exec.LookPath("codex")
+	return err == nil
 }

@@ -23,6 +23,8 @@ func BuildContext(opts ListOptions) (string, error) {
 	fmt.Fprintf(&b, "Provider: %s\n", providerOrAll(opts.Provider))
 	if opts.Folder != "" {
 		fmt.Fprintf(&b, "Folder: %s\n", expandHome(opts.Folder))
+	} else if opts.CWD != "" {
+		fmt.Fprintf(&b, "Folder: %s\n", expandHome(opts.CWD))
 	} else {
 		fmt.Fprintf(&b, "Folder: auto-discovered\n")
 	}
@@ -33,7 +35,7 @@ func BuildContext(opts ListOptions) (string, error) {
 		guardrailsFolder = opts.Folder
 	}
 	if guardrailsFolder != "" {
-		if guardrails, err := BuildGuardrails(guardrailsFolder); err == nil && !strings.Contains(guardrails, "No repo guardrail files found") {
+		if guardrails, err := BuildGuardrails(guardrailsFolder); err == nil && !strings.Contains(guardrails, "No repo instruction files found") {
 			fmt.Fprintln(&b, strings.TrimSpace(guardrails))
 			fmt.Fprintln(&b)
 		}

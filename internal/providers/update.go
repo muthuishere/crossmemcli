@@ -43,7 +43,6 @@ func UpdateContext(opts ListOptions) (UpdateResult, error) {
 	writes := map[string][]byte{
 		filepath.Join(outDir, "guardrails.md"): []byte(guardrails),
 		filepath.Join(outDir, "context.md"):    []byte(context),
-		filepath.Join(outDir, "summary.md"):    []byte(context),
 		filepath.Join(outDir, "sessions.json"): marshalIndent(sessions),
 		filepath.Join(outDir, "sources.json"): marshalIndent(map[string]any{
 			"stores":     stores,
