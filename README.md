@@ -4,6 +4,8 @@ Portable context memory across local agent tools.
 
 `crossmem` discovers local Claude Code, Codex, Devin, and Copilot session stores, lists available sessions, and emits a clean context bundle that can be loaded into another agent session.
 
+It is primarily a fast local context CLI. Skills are optional global integration points for agents that support `SKILL.md`.
+
 ## Install
 
 ### Go
@@ -35,7 +37,15 @@ crossmem list --provider devin --limit 10
 crossmem load . --limit 5
 crossmem load . --provider codex --out .crossmem/context.md
 crossmem update .
-crossmem install --skills
+crossmem help load
+```
+
+Use command help for the full option set:
+
+```sh
+crossmem help scan
+crossmem help list
+crossmem help update
 ```
 
 ## Local Stores
@@ -60,7 +70,7 @@ crossmem install --skills
 
 ## Skill Install
 
-Global activation follows the same shape as `windowctl`:
+Optional global skill activation follows the same shape as `windowctl`:
 
 ```sh
 crossmem install --skills

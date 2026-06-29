@@ -13,30 +13,157 @@ import (
 	"github.com/muthuishere/crossmemcli/internal/skills"
 )
 
-const helpText = `crossmem
+const helpText = `Usage: crossmem [options] [command]
 
 Portable context memory across local agent tools.
 
-Usage:
-  crossmem scan [--json]
-  crossmem list [--provider claude|codex|copilot|devin|all] [--folder PATH] [--limit N] [--json]
-  crossmem load [FOLDER] [--provider claude|codex|copilot|devin|all] [--limit N] [--out FILE]
-  crossmem context [same flags as load]
-  crossmem guardrails [FOLDER]
-  crossmem update [FOLDER] [--provider claude|codex|copilot|devin|all] [--limit N]
-  crossmem install --skills [--agents]
-  crossmem uninstall --skills [--agents]
+Options:
+  -h, --help                              display help for command
+
+Commands:
+  scan [options]                          discover local Claude, Codex, Devin, and Copilot stores
+  list [options]                          list available sessions across stores
+  sessions [options]                      alias for list
+  load [options] [folder]                 print a portable context bundle for a repo or folder
+  context [options] [folder]              alias for load
+  update [options] [folder]               write .crossmem/context.md and source manifests
+  guardrails [folder]                     print active repo instruction file references
+  install --skills [options]              install the global crossmem-loader skill
+  uninstall --skills [options]            remove the global crossmem-loader skill
+  help [command]                          display help for command
 
 Examples:
   crossmem scan
+  crossmem list --provider claude --limit 20
   crossmem list --provider devin --limit 10
-  crossmem load . --limit 5 --out .crossmem/context.md
+  crossmem load . --provider codex --limit 5
+  crossmem load /path/to/repo --out /tmp/context.md
+  crossmem update .
+  crossmem help load
+`
+
+const scanHelpText = `Usage: crossmem scan [options]
+
+Discover known local context stores without reading transcript contents.
+
+Options:
+  --json                                  print stores as JSON
+  -h, --help                              display help for command
+
+Examples:
+  crossmem scan
+  crossmem scan --json
+`
+
+const listHelpText = `Usage: crossmem list [options]
+
+List available local sessions. Use --folder to focus on sessions tied to one repo.
+
+Options:
+  --provider <name>                       claude, codex, copilot, devin, or all (default: all)
+  --folder <path>                         only show sessions matching a folder or workspace hint
+  --limit <number>                        maximum sessions to print (default: 50)
+  --json                                  print sessions as JSON
+  -h, --help                              display help for command
+
+Examples:
+  crossmem list --provider claude --limit 20
+  crossmem list --provider devin --limit 10
+  crossmem list --folder /path/to/repo --json
+`
+
+const loadHelpText = `Usage: crossmem load [options] [folder]
+
+Print a portable context bundle for a repo or folder. The CLI extracts readable recent
+history and references active repo instruction files; the consuming agent decides whether
+to summarize or request more context.
+
+Options:
+  --provider <name>                       claude, codex, copilot, devin, or all (default: all)
+  --limit <number>                        maximum sessions to include (default: 10)
+  --out <file>                            write bundle to file instead of stdout
+  -h, --help                              display help for command
+
+Examples:
+  crossmem load .
+  crossmem load /path/to/repo --provider codex --limit 5
+  crossmem load . --out .crossmem/context.md
+`
+
+const updateHelpText = `Usage: crossmem update [options] [folder]
+
+Write durable local context files under <folder>/.crossmem.
+
+Files:
+  context.md                              portable context bundle
+  guardrails.md                           active repo instruction file references
+  sessions.json                           selected session metadata
+  sources.json                            discovered store and instruction metadata
+
+Options:
+  --provider <name>                       claude, codex, copilot, devin, or all (default: all)
+  --limit <number>                        maximum sessions to include (default: 10)
+  -h, --help                              display help for command
+
+Examples:
+  crossmem update .
+  crossmem update /path/to/repo --provider claude --limit 5
+`
+
+const guardrailsHelpText = `Usage: crossmem guardrails [folder]
+
+Print the repo instruction files an agent should read before acting.
+
+Looks for:
+  AGENTS.md
+  CLAUDE.md
+  .agents/AGENTS.md
+  .claude/CLAUDE.md
+
+Examples:
+  crossmem guardrails
+  crossmem guardrails /path/to/repo
+`
+
+const installHelpText = `Usage: crossmem install --skills [options]
+
+Install the global crossmem-loader skill. This does not create repo-local skill folders.
+
+Options:
+  --skills                                required; installs the bundled skill
+  --agents                                also target ~/.agents/skills when codex is not on PATH
+  -h, --help                              display help for command
+
+Targets:
+  ~/.claude/skills/crossmem-loader
+  ~/.agents/skills/crossmem-loader        when codex is on PATH or --agents is passed
+
+Examples:
+  crossmem install --skills
+  crossmem install --skills --agents
+`
+
+const uninstallHelpText = `Usage: crossmem uninstall --skills [options]
+
+Remove the global crossmem-loader skill.
+
+Options:
+  --skills                                required; removes the bundled skill
+  --agents                                also target ~/.agents/skills when codex is not on PATH
+  -h, --help                              display help for command
+
+Examples:
+  crossmem uninstall --skills
+  crossmem uninstall --skills --agents
 `
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) error {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		_, _ = fmt.Fprint(stdout, helpText)
 		return nil
+	}
+	if args[0] == "help" {
+		return runHelp(args[1:], stdout)
 	}
 
 	switch args[0] {
@@ -59,7 +186,54 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 }
 
+func runHelp(args []string, stdout io.Writer) error {
+	if len(args) == 0 {
+		_, _ = fmt.Fprint(stdout, helpText)
+		return nil
+	}
+	text, ok := commandHelp(args[0])
+	if !ok {
+		return fmt.Errorf("unknown command %q\n\n%s", args[0], helpText)
+	}
+	_, _ = fmt.Fprint(stdout, text)
+	return nil
+}
+
+func commandHelp(command string) (string, bool) {
+	switch command {
+	case "scan":
+		return scanHelpText, true
+	case "list", "sessions":
+		return listHelpText, true
+	case "load", "context":
+		return loadHelpText, true
+	case "update":
+		return updateHelpText, true
+	case "guardrails":
+		return guardrailsHelpText, true
+	case "install":
+		return installHelpText, true
+	case "uninstall":
+		return uninstallHelpText, true
+	default:
+		return "", false
+	}
+}
+
+func isHelpRequest(args []string) bool {
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
 func runGuardrails(args []string, stdout io.Writer) error {
+	if isHelpRequest(args) {
+		_, _ = fmt.Fprint(stdout, guardrailsHelpText)
+		return nil
+	}
 	folder := "."
 	if len(args) > 0 {
 		folder = args[0]
@@ -73,6 +247,10 @@ func runGuardrails(args []string, stdout io.Writer) error {
 }
 
 func runUpdate(args []string, stdout io.Writer) error {
+	if isHelpRequest(args) {
+		_, _ = fmt.Fprint(stdout, updateHelpText)
+		return nil
+	}
 	args, cwd := extractPositionalFolder(args)
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -99,6 +277,10 @@ func runUpdate(args []string, stdout io.Writer) error {
 }
 
 func runScan(args []string, stdout io.Writer) error {
+	if isHelpRequest(args) {
+		_, _ = fmt.Fprint(stdout, scanHelpText)
+		return nil
+	}
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonOut := fs.Bool("json", false, "print JSON")
@@ -130,6 +312,10 @@ func runScan(args []string, stdout io.Writer) error {
 }
 
 func runList(args []string, stdout io.Writer) error {
+	if isHelpRequest(args) {
+		_, _ = fmt.Fprint(stdout, listHelpText)
+		return nil
+	}
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	provider := fs.String("provider", "all", "provider")
@@ -163,6 +349,10 @@ func runList(args []string, stdout io.Writer) error {
 }
 
 func runLoad(args []string, stdout io.Writer) error {
+	if isHelpRequest(args) {
+		_, _ = fmt.Fprint(stdout, loadHelpText)
+		return nil
+	}
 	args, cwd := extractPositionalFolder(args)
 	fs := flag.NewFlagSet("load", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -225,6 +415,14 @@ func extractPositionalFolder(args []string) ([]string, string) {
 }
 
 func runTopLevelSkillAction(verb string, args []string, stdout io.Writer, stderr io.Writer) error {
+	if isHelpRequest(args) {
+		if verb == "uninstall" {
+			_, _ = fmt.Fprint(stdout, uninstallHelpText)
+		} else {
+			_, _ = fmt.Fprint(stdout, installHelpText)
+		}
+		return nil
+	}
 	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	skillsFlag := fs.Bool("skills", false, "install or remove the bundled crossmem-loader skill")
