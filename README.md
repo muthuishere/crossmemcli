@@ -2,7 +2,7 @@
 
 Portable context memory across local agent tools.
 
-`crossmem` discovers local Claude Code, Codex, Devin, and Copilot session stores, lists available sessions, and emits a clean context bundle that can be loaded into another agent session.
+`crossmem` discovers local Claude Code, Codex, Devin, Copilot, and OpenCode session stores, lists available sessions, and emits a clean context bundle that can be loaded into another agent session.
 
 It is primarily a fast local context CLI. Skills are optional global integration points for agents that support `SKILL.md`.
 
@@ -158,7 +158,7 @@ Pass `--agents` to force the agents target even when `codex` is not on `PATH`:
 crossmem install --skills --agents
 ```
 
-`crossmem` does not install repo-local skills by default. The product is a global, cross-repo context layer for Claude Code, Codex, Devin, Copilot, and spawned agent processes that need to ask "what context exists for this folder?".
+`crossmem` does not install repo-local skills by default. The product is a global, cross-repo context layer for Claude Code, Codex, Devin, Copilot, OpenCode, and spawned agent processes that need to ask "what context exists for this folder?".
 
 ## Context Update
 

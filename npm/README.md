@@ -2,7 +2,7 @@
 
 **Portable context memory across local agent tools.**
 
-`crossmem` discovers your local Claude Code, Codex, Devin, and Copilot session stores, lists available sessions, and emits a clean context bundle that can be loaded into another agent session — so context follows you across tools and repos.
+`crossmem` discovers your local Claude Code, Codex, Devin, Copilot, and OpenCode session stores, lists available sessions, and emits a clean context bundle that can be loaded into another agent session — so context follows you across tools and repos.
 
 It is primarily a fast, local-first context CLI. It sends no telemetry; everything is local reads.
 

@@ -54,6 +54,12 @@ func BuildSessionContext(ref string, cwd string, full bool) (string, error) {
 			return "", err
 		}
 		session = s
+	} else if id, ok := strings.CutPrefix(ref, "opencode:"); ok {
+		s, err := loadOpenCodeSession(id)
+		if err != nil {
+			return "", err
+		}
+		session = s
 	} else {
 		abs, err := filepath.Abs(expandHome(ref))
 		if err != nil {
@@ -94,9 +100,12 @@ func computePreviews(sessions []Session, maxChars int) []string {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			s := sessions[i]
-			if s.Provider == "devin" {
+			switch s.Provider {
+			case "devin":
 				out[i] = devinPreview(s.ID, maxChars)
-			} else {
+			case "opencode":
+				out[i] = openCodePreview(s.ID, maxChars)
+			default:
 				out[i] = jsonlPreview(s.Path, s.Provider, maxChars, previewLines)
 			}
 		}(i)
@@ -143,7 +152,7 @@ func renderBundle(sessions []Session, bodies []string, opts ListOptions) string 
 // tool (including Copilot) was covered.
 func searchedProviders(provider string) string {
 	if provider == "" || provider == "all" {
-		return "claude, codex, copilot, devin"
+		return "claude, codex, copilot, devin, opencode"
 	}
 	return provider
 }
@@ -249,24 +258,68 @@ func extractCopilot(obj map[string]any) string {
 		return roleText("assistant", stringValue(data["content"]))
 	}
 
-	if kind, ok := obj["kind"].(float64); !ok || kind != 0 {
-		return ""
+	// VS Code chatSessions journal format. A kind:0 line is a snapshot whose
+	// v.requests may hold turns; the conversation usually accumulates across
+	// kind:2 append lines (k == ["requests"], v is the appended request(s)).
+	// Pull the requests from whichever this line carries.
+	var requests []any
+	if kind, ok := obj["kind"].(float64); ok {
+		switch kind {
+		case 0:
+			if v, ok := obj["v"].(map[string]any); ok {
+				requests, _ = v["requests"].([]any)
+			}
+		case 2:
+			if keyPath, ok := obj["k"].([]any); ok && len(keyPath) >= 1 && stringValue(keyPath[0]) == "requests" {
+				switch v := obj["v"].(type) {
+				case []any:
+					requests = v
+				case map[string]any:
+					requests = []any{v}
+				}
+			}
+		}
 	}
-	v, _ := obj["v"].(map[string]any)
-	requests, _ := v["requests"].([]any)
+
 	var chunks []string
 	for _, item := range requests {
 		req, _ := item.(map[string]any)
-		msg, _ := req["message"].(map[string]any)
-		if text := roleText("user", stringValue(msg["text"])); text != "" {
-			chunks = append(chunks, text)
+		if req == nil {
+			continue
 		}
-		info, _ := req["responseMarkdownInfo"].(map[string]any)
-		if text := roleText("assistant", stringValue(info["markdown"])); text != "" {
+		if msg, ok := req["message"].(map[string]any); ok {
+			if text := roleText("user", stringValue(msg["text"])); text != "" {
+				chunks = append(chunks, text)
+			}
+		}
+		if text := roleText("assistant", copilotResponseText(req)); text != "" {
 			chunks = append(chunks, text)
 		}
 	}
 	return strings.Join(chunks, "\n")
+}
+
+// copilotResponseText pulls the assistant reply from a Copilot request. Current
+// VS Code builds store it as response[].value markdown fragments; older builds
+// used responseMarkdownInfo.markdown (a string).
+func copilotResponseText(req map[string]any) string {
+	if resp, ok := req["response"].([]any); ok {
+		var parts []string
+		for _, item := range resp {
+			if m, ok := item.(map[string]any); ok {
+				if v := stringValue(m["value"]); v != "" {
+					parts = append(parts, v)
+				}
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "")
+		}
+	}
+	if info, ok := req["responseMarkdownInfo"].(map[string]any); ok {
+		return stringValue(info["markdown"])
+	}
+	return ""
 }
 
 func devinPreview(sessionID string, maxChars int) string {

@@ -1,6 +1,6 @@
 {
   "name": "@muthuishere/crossmem-linux-x64",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "crossmem prebuilt binary for linux-x64",
   "repository": {
     "type": "git",
@@ -10,7 +10,13 @@
     "access": "public"
   },
   "license": "MIT",
-  "os": ["linux"],
-  "cpu": ["x64"],
-  "files": ["bin/"]
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/"
+  ]
 }

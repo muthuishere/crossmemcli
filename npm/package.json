@@ -1,6 +1,6 @@
 {
   "name": "@muthuishere/crossmem",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Portable context memory across local agent tools.",
   "keywords": [
     "crossmem",
@@ -10,6 +10,7 @@
     "codex",
     "devin",
     "copilot",
+    "opencode",
     "cli"
   ],
   "homepage": "https://github.com/muthuishere/crossmemcli",
@@ -33,11 +34,11 @@
     "README.md"
   ],
   "optionalDependencies": {
-    "@muthuishere/crossmem-darwin-arm64": "0.1.4",
-    "@muthuishere/crossmem-darwin-x64": "0.1.4",
-    "@muthuishere/crossmem-linux-arm64": "0.1.4",
-    "@muthuishere/crossmem-linux-x64": "0.1.4",
-    "@muthuishere/crossmem-windows-x64": "0.1.4"
+    "@muthuishere/crossmem-darwin-arm64": "0.1.5",
+    "@muthuishere/crossmem-darwin-x64": "0.1.5",
+    "@muthuishere/crossmem-linux-arm64": "0.1.5",
+    "@muthuishere/crossmem-linux-x64": "0.1.5",
+    "@muthuishere/crossmem-windows-x64": "0.1.5"
   },
   "os": [
     "darwin",

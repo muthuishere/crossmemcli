@@ -22,6 +22,7 @@ var storeDefinitions = []storeDefinition{
 	{"copilot", "zed-copilot", "~/Library/Application Support/Zed/copilot", "Zed Copilot language-server cache; not a chat transcript store by itself."},
 	{"devin", "sqlite-sessions", "~/.local/share/devin/cli/sessions.db", "Devin CLI SQLite session DB."},
 	{"devin", "cli-logs", "~/.local/share/devin/cli/logs", "Devin CLI logs. Session content primarily lives in sessions.db."},
+	{"opencode", "sqlite-sessions", "~/.local/share/opencode/opencode.db", "OpenCode SQLite session DB (also opencode-dev.db / opencode-local.db)."},
 }
 
 func expandHome(path string) string {

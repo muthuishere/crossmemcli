@@ -40,6 +40,14 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 			diag.Debugf("list devin err=%q", err)
 		}
 	}
+	if opts.Provider == "all" || opts.Provider == "opencode" {
+		opencode, err := listOpenCode(opts.Limit, opts.CWD)
+		if err == nil {
+			sessions = append(sessions, opencode...)
+		} else {
+			diag.Debugf("list opencode err=%q", err)
+		}
+	}
 
 	for _, root := range providerRoots(opts.Provider) {
 		jsonl, err := listJSONL(root, opts.Provider)
