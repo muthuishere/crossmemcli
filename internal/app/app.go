@@ -348,11 +348,13 @@ func runList(args []string, stdout io.Writer) error {
 	if cwd == "" {
 		cwd = *folder
 	}
+	sp := startSpinner(os.Stderr, "Scanning sessions…")
 	sessions, err := providers.ListSessions(providers.ListOptions{
 		Provider: *provider,
 		CWD:      cwd,
 		Limit:    *limit,
 	})
+	sp.Stop()
 	if err != nil {
 		return err
 	}
@@ -394,6 +396,7 @@ func runLoad(args []string, stdout io.Writer) error {
 	if cwd == "" {
 		cwd = folder
 	}
+	sp := startSpinner(os.Stderr, "Loading context…")
 	var bundle string
 	var err error
 	if *session != "" {
@@ -406,6 +409,7 @@ func runLoad(args []string, stdout io.Writer) error {
 			Full:     *full,
 		})
 	}
+	sp.Stop()
 	if err != nil {
 		return err
 	}

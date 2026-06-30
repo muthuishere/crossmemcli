@@ -8,76 +8,108 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
 const (
-	// summaryPreviewChars is the default compact excerpt per session — enough
-	// for an agent to summarize. fullPreviewChars is the larger excerpt emitted
-	// with --full when the user wants fuller context loaded verbatim.
-	summaryPreviewChars = 1800
-	fullPreviewChars    = 24000
-	summaryPreviewLines = 180
-	fullPreviewLines    = 2000
+	// briefPreviewChars is the default per-session budget of cleaned conversation
+	// fed to the agent to synthesize a persona + decisions brief. fullPreviewChars
+	// is the larger, more verbatim budget used with --full.
+	briefPreviewChars = 9000
+	fullPreviewChars  = 24000
+	previewLines      = 4000
+	// previewWorkers bounds concurrent transcript reads so we go fast without
+	// tripping "too many open files".
+	previewWorkers = 24
 )
 
+// BuildContext renders a bundle of the most recent sessions matching the folder.
+// crossmem is deterministic plumbing: it finds the sessions and emits their
+// conversation. Deciding what to keep, skip, or treat as noise is the consuming
+// agent's job (see the crossmem-loader skill).
 func BuildContext(opts ListOptions) (string, error) {
 	sessions, err := ListSessions(opts)
 	if err != nil {
 		return "", err
 	}
-	return renderBundle(sessions, opts), nil
+	maxChars := briefPreviewChars
+	if opts.Full {
+		maxChars = fullPreviewChars
+	}
+	bodies := computePreviews(sessions, maxChars)
+	return renderBundle(sessions, bodies, opts), nil
 }
 
 // BuildSessionContext renders a bundle for one specific session the user picked
-// (e.g. from a "choose from the last 5" list), instead of every session matching
-// the folder. ref is the uniform handle from list: a transcript file path for
-// the JSONL tools, or "devin:<id>" for the SQLite-backed Devin store. cwd is
-// used only to attach the repo's active instructions to the bundle.
+// from a list. ref is the uniform handle: a transcript file path for the JSONL
+// tools, or "devin:<id>" for the SQLite-backed Devin store.
 func BuildSessionContext(ref string, cwd string, full bool) (string, error) {
+	var session Session
 	if id, ok := strings.CutPrefix(ref, "devin:"); ok {
-		session, err := loadDevinSession(id)
+		s, err := loadDevinSession(id)
 		if err != nil {
 			return "", err
 		}
-		return renderBundle([]Session{session}, ListOptions{Provider: "devin", CWD: cwd, Full: full}), nil
+		session = s
+	} else {
+		abs, err := filepath.Abs(expandHome(ref))
+		if err != nil {
+			return "", err
+		}
+		info, err := os.Stat(abs)
+		if err != nil {
+			return "", err
+		}
+		provider := inferProvider(abs, "")
+		if provider == "unknown" {
+			return "", fmt.Errorf("unrecognized session path: %s", abs)
+		}
+		title, scwd := readJSONLMeta(abs, provider)
+		workspace := scwd
+		if workspace == "" {
+			workspace = inferWorkspace(abs, provider)
+		}
+		session = Session{Provider: provider, Path: abs, Bytes: info.Size(), Modified: info.ModTime(), Workspace: workspace, Title: title}
 	}
-
-	abs, err := filepath.Abs(expandHome(ref))
-	if err != nil {
-		return "", err
+	maxChars := briefPreviewChars
+	if full {
+		maxChars = fullPreviewChars
 	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", err
-	}
-	provider := inferProvider(abs, "")
-	if provider == "unknown" {
-		return "", fmt.Errorf("unrecognized session path: %s", abs)
-	}
-	title, scwd := readJSONLMeta(abs, provider)
-	workspace := scwd
-	if workspace == "" {
-		workspace = inferWorkspace(abs, provider)
-	}
-	session := Session{
-		Provider:  provider,
-		Path:      abs,
-		Bytes:     info.Size(),
-		Modified:  info.ModTime(),
-		Workspace: workspace,
-		Title:     title,
-	}
-	return renderBundle([]Session{session}, ListOptions{Provider: provider, CWD: cwd, Full: full}), nil
+	body := computePreviews([]Session{session}, maxChars)[0]
+	return renderBundle([]Session{session}, []string{body}, ListOptions{Provider: session.Provider, CWD: cwd, Full: full}), nil
 }
 
-func renderBundle(sessions []Session, opts ListOptions) string {
+// computePreviews extracts each session's cleaned conversation concurrently.
+func computePreviews(sessions []Session, maxChars int) []string {
+	out := make([]string, len(sessions))
+	sem := make(chan struct{}, previewWorkers)
+	var wg sync.WaitGroup
+	for i := range sessions {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			s := sessions[i]
+			if s.Provider == "devin" {
+				out[i] = devinPreview(s.ID, maxChars)
+			} else {
+				out[i] = jsonlPreview(s.Path, s.Provider, maxChars, previewLines)
+			}
+		}(i)
+	}
+	wg.Wait()
+	return out
+}
+
+func renderBundle(sessions []Session, bodies []string, opts ListOptions) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# CrossMem Context Bundle\n\n")
 	fmt.Fprintf(&b, "Generated: %s\n", time.Now().UTC().Format(time.RFC3339))
-	fmt.Fprintf(&b, "Provider: %s\n", providerOrAll(opts.Provider))
+	fmt.Fprintf(&b, "Searched: %s\n", searchedProviders(opts.Provider))
 	if opts.CWD != "" {
 		fmt.Fprintf(&b, "Folder: %s\n", expandHome(opts.CWD))
 	} else {
@@ -90,48 +122,28 @@ func renderBundle(sessions []Session, opts ListOptions) string {
 	fmt.Fprintf(&b, "Mode: %s\n", mode)
 	fmt.Fprintf(&b, "Sessions: %d\n\n", len(sessions))
 
-	previewChars := summaryPreviewChars
-	previewLines := summaryPreviewLines
-	if opts.Full {
-		previewChars = fullPreviewChars
-		previewLines = fullPreviewLines
-	}
-
-	if opts.CWD != "" {
-		if guardrails, err := BuildGuardrails(opts.CWD); err == nil && !strings.Contains(guardrails, "No repo instruction files found") {
-			fmt.Fprintln(&b, strings.TrimSpace(guardrails))
-			fmt.Fprintln(&b)
-		}
-	}
-
-	for _, session := range sessions {
-		preview := ""
-		if session.Provider == "devin" {
-			preview = devinPreview(session.ID, previewChars)
-		} else {
-			preview = jsonlPreview(session.Path, session.Provider, previewChars, previewLines)
-		}
+	for i, session := range sessions {
 		fmt.Fprintf(&b, "## %s: %s\n\n", session.Provider, titleOrBase(session))
-		fmt.Fprintf(&b, "- Path: `%s`\n", session.Path)
 		fmt.Fprintf(&b, "- Modified: %s\n", session.Modified.Format(time.RFC3339))
-		fmt.Fprintf(&b, "- Bytes: %d\n", session.Bytes)
 		if session.Workspace != "" {
 			fmt.Fprintf(&b, "- Workspace: `%s`\n", session.Workspace)
 		}
 		fmt.Fprintln(&b)
-		if preview == "" {
+		if strings.TrimSpace(bodies[i]) == "" {
 			fmt.Fprintln(&b, "_No readable text extracted._")
 		} else {
-			fmt.Fprintln(&b, preview)
+			fmt.Fprintln(&b, bodies[i])
 		}
 		fmt.Fprintln(&b)
 	}
 	return strings.TrimSpace(b.String()) + "\n"
 }
 
-func providerOrAll(provider string) string {
-	if provider == "" {
-		return "all"
+// searchedProviders names the stores that were searched, so it's clear every
+// tool (including Copilot) was covered.
+func searchedProviders(provider string) string {
+	if provider == "" || provider == "all" {
+		return "claude, codex, copilot, devin"
 	}
 	return provider
 }

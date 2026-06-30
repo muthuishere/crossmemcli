@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/muthuishere/crossmemcli/internal/diag"
@@ -75,7 +76,14 @@ func filterByCWD(sessions []Session, cwd string) []Session {
 }
 
 func listJSONL(root string, provider string) ([]Session, error) {
-	var sessions []Session
+	// First walk the tree (cheap) to collect candidate transcript files, then read
+	// each file's metadata (cwd + title) concurrently — that per-file read is the
+	// bottleneck when there are hundreds of transcripts.
+	type entry struct {
+		path string
+		info os.FileInfo
+	}
+	var entries []entry
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
 			if err != nil {
@@ -83,30 +91,45 @@ func listJSONL(root string, provider string) ([]Session, error) {
 			}
 			return nil
 		}
-		inferred := inferProvider(path, provider)
-		if inferred == "copilot" && !isCopilotSessionPath(path) {
+		if inferProvider(path, provider) == "copilot" && !isCopilotSessionPath(path) {
 			return nil
 		}
 		info, err := d.Info()
 		if err != nil {
 			return nil
 		}
-		title, cwd := readJSONLMeta(path, inferred)
-		workspace := cwd
-		if workspace == "" {
-			workspace = inferWorkspace(path, inferred)
-		}
-		sessions = append(sessions, Session{
-			Provider:  inferred,
-			Ref:       path,
-			Path:      path,
-			Bytes:     info.Size(),
-			Modified:  info.ModTime(),
-			Workspace: workspace,
-			Title:     title,
-		})
+		entries = append(entries, entry{path: path, info: info})
 		return nil
 	})
+
+	sessions := make([]Session, len(entries))
+	sem := make(chan struct{}, previewWorkers)
+	var wg sync.WaitGroup
+	for i := range entries {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			e := entries[i]
+			inferred := inferProvider(e.path, provider)
+			title, cwd := readJSONLMeta(e.path, inferred)
+			workspace := cwd
+			if workspace == "" {
+				workspace = inferWorkspace(e.path, inferred)
+			}
+			sessions[i] = Session{
+				Provider:  inferred,
+				Ref:       e.path,
+				Path:      e.path,
+				Bytes:     e.info.Size(),
+				Modified:  e.info.ModTime(),
+				Workspace: workspace,
+				Title:     title,
+			}
+		}(i)
+	}
+	wg.Wait()
 	return sessions, err
 }
 
