@@ -51,3 +51,17 @@ func TestExtractOpenCodeSkipsNonText(t *testing.T) {
 		t.Fatalf("expected empty for tool part, got %q", got)
 	}
 }
+
+// The Copilot CLI writes RFC3339 timestamps with milliseconds; older SQLite rows
+// may use the plain datetime() form. Both must parse; junk yields the zero time.
+func TestParseTimeFlexible(t *testing.T) {
+	if parseTimeFlexible("2026-06-29T16:03:02.557Z").IsZero() {
+		t.Fatal("RFC3339 with millis should parse")
+	}
+	if parseTimeFlexible("2026-06-29 16:03:02").IsZero() {
+		t.Fatal("plain datetime should parse")
+	}
+	if !parseTimeFlexible("").IsZero() || !parseTimeFlexible("not-a-time").IsZero() {
+		t.Fatal("empty/garbage should be zero time")
+	}
+}

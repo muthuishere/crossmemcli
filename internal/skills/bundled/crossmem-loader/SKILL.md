@@ -1,6 +1,6 @@
 ---
 name: crossmem-loader
-description: Restore prior work context for the current folder using the crossmem CLI — it pulls the last real session from local Claude Code, Codex, Devin, Copilot, and OpenCode histories. Use this FIRST, before listing or reading files, whenever the user says any of: pick up where I left off, resume, continue where I was, what was I doing here, where did I leave off, catch me up on this folder, load context, load my last session, resume from another agent/tool, or import Claude/Codex/Devin/Copilot/OpenCode memory.
+description: Restore prior work context for the current folder using the crossmem CLI — it pulls the last real session from local Claude Code, Codex, Devin, Copilot (VS Code and CLI), and OpenCode histories. Use this FIRST, before listing or reading files, whenever the user says any of: pick up where I left off, resume, continue where I was, what was I doing here, where did I leave off, catch me up on this folder, load context, load my last session, resume from another agent/tool, or import Claude/Codex/Devin/Copilot/OpenCode memory.
 ---
 
 # CrossMem Loader
@@ -26,7 +26,7 @@ When the user asks to load context / resume / pick up where they left off:
    crossmem list . --limit 5
    ```
 
-   This searches all tools (Claude, Codex, Copilot, Devin, OpenCode), newest first. Each row's
+   This searches all tools (Claude, Codex, Copilot, Copilot CLI, Devin, OpenCode), newest first. Each row's
    last column is a handle: a transcript path, or `devin:<id>`. If nothing matches,
    name the folder: `crossmem list /path/to/repo --limit 5`.
 

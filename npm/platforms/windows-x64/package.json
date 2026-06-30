@@ -1,6 +1,6 @@
 {
   "name": "@muthuishere/crossmem-windows-x64",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "crossmem prebuilt binary for windows-x64",
   "repository": {
     "type": "git",

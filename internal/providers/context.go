@@ -60,6 +60,12 @@ func BuildSessionContext(ref string, cwd string, full bool) (string, error) {
 			return "", err
 		}
 		session = s
+	} else if id, ok := strings.CutPrefix(ref, "copilot-cli:"); ok {
+		s, err := loadCopilotCLISession(id)
+		if err != nil {
+			return "", err
+		}
+		session = s
 	} else {
 		abs, err := filepath.Abs(expandHome(ref))
 		if err != nil {
@@ -105,6 +111,8 @@ func computePreviews(sessions []Session, maxChars int) []string {
 				out[i] = devinPreview(s.ID, maxChars)
 			case "opencode":
 				out[i] = openCodePreview(s.ID, maxChars)
+			case "copilot-cli":
+				out[i] = copilotCLIPreview(s.ID, maxChars)
 			default:
 				out[i] = jsonlPreview(s.Path, s.Provider, maxChars, previewLines)
 			}
@@ -152,7 +160,7 @@ func renderBundle(sessions []Session, bodies []string, opts ListOptions) string 
 // tool (including Copilot) was covered.
 func searchedProviders(provider string) string {
 	if provider == "" || provider == "all" {
-		return "claude, codex, copilot, devin, opencode"
+		return "claude, codex, copilot, copilot-cli, devin, opencode"
 	}
 	return provider
 }

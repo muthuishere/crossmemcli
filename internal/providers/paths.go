@@ -23,6 +23,7 @@ var storeDefinitions = []storeDefinition{
 	{"devin", "sqlite-sessions", "~/.local/share/devin/cli/sessions.db", "Devin CLI SQLite session DB."},
 	{"devin", "cli-logs", "~/.local/share/devin/cli/logs", "Devin CLI logs. Session content primarily lives in sessions.db."},
 	{"opencode", "sqlite-sessions", "~/.local/share/opencode/opencode.db", "OpenCode SQLite session DB (also opencode-dev.db / opencode-local.db)."},
+	{"copilot-cli", "sqlite-sessions", "~/.copilot/session-store.db", "GitHub Copilot CLI SQLite session store."},
 }
 
 func expandHome(path string) string {

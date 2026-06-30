@@ -48,6 +48,14 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 			diag.Debugf("list opencode err=%q", err)
 		}
 	}
+	if opts.Provider == "all" || opts.Provider == "copilot-cli" {
+		copilotCLI, err := listCopilotCLI(opts.Limit, opts.CWD)
+		if err == nil {
+			sessions = append(sessions, copilotCLI...)
+		} else {
+			diag.Debugf("list copilot-cli err=%q", err)
+		}
+	}
 
 	for _, root := range providerRoots(opts.Provider) {
 		jsonl, err := listJSONL(root, opts.Provider)

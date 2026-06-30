@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`crossmem` is a local-first CLI that makes agent context portable. It discovers the on-disk session stores of local agent tools (Claude Code, Codex, Devin, Copilot, OpenCode), lists sessions, and emits a clean Markdown **context bundle** that a different agent session can load. It sends no telemetry; everything is local reads.
+`crossmem` is a local-first CLI that makes agent context portable. It discovers the on-disk session stores of local agent tools (Claude Code, Codex, Devin, Copilot (VS Code and CLI), OpenCode), lists sessions, and emits a clean Markdown **context bundle** that a different agent session can load. It sends no telemetry; everything is local reads.
 
 ## Commands
 
@@ -40,7 +40,7 @@ Thin entrypoint → command dispatch → providers core.
 Every supported tool's stores are declared once in `paths.go` `storeDefinitions` (provider, kind, path, note). Two fundamentally different store shapes are unified into `Session`/`Store`:
 
 1. **JSONL-on-disk** (Claude, Codex, Copilot) — `listJSONL` walks the provider root for `*.jsonl`. Provider is inferred from the path (`inferProvider`), workspace from path structure (`inferWorkspace` — e.g. Claude encodes the cwd as a `-`-delimited dir name), and a title is sniffed from the first ~12 lines (`readJSONLTitle`, provider-specific keys). Copilot's VS Code store is a journal (`kind:0` snapshot + `kind:2` append lines); `extractCopilot` reconstructs turns from `requests[].message.text` + `response[].value`.
-2. **SQLite** (Devin, OpenCode) — `listDevin`/`listOpenCode` open the DB read-only and query directly. Devin uses `sessions.db`; OpenCode uses `~/.local/share/opencode/opencode*.db` (`session`/`message`/`part` tables, `session.directory` = cwd). Both expose sessions via a `Ref` (`devin:<id>` / `opencode:<id>`) that `BuildSessionContext` routes on. The sibling `auth.json` / credential tables are never read.
+2. **SQLite** (Devin, OpenCode, Copilot CLI) — `listDevin`/`listOpenCode`/`listCopilotCLI` open the DB read-only and query directly. Devin uses `sessions.db`; OpenCode uses `~/.local/share/opencode/opencode*.db` (`session`/`message`/`part` tables, `session.directory` = cwd); the GitHub Copilot **CLI** (distinct from the VS Code Copilot JSONL store) uses `~/.copilot/session-store.db` (`sessions.cwd` + a denormalized `turns` table). Each exposes sessions via a `Ref` (`devin:<id>` / `opencode:<id>` / `copilot-cli:<id>`) that `BuildSessionContext` routes on. The sibling `auth.json` / `auth.db` / credential tables are never read.
 
 `ListSessions` merges both, sorts by mtime desc, applies `--limit`. CWD/folder filtering (`filterByCWD` / `sameOrChild`) matches a session's workspace or title against the target repo path.
 
