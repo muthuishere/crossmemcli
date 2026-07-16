@@ -1,3 +1,6 @@
+// Command crossmem discovers local Claude Code, Codex, Devin, and Copilot
+// session stores and emits a portable context bundle that can be loaded
+// into another agent session.
 package main
 
 import (

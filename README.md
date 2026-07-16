@@ -1,8 +1,10 @@
 # crossmem
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/muthuishere/crossmemcli.svg)](https://pkg.go.dev/github.com/muthuishere/crossmemcli)
+
 Portable context memory across local agent tools.
 
-`crossmem` discovers local Claude Code, Codex, Devin, Copilot (VS Code and CLI), and OpenCode session stores, lists available sessions, and emits a clean context bundle that can be loaded into another agent session.
+`crossmem` discovers local Claude Code, Codex, Devin, Copilot (VS Code and CLI), and OpenCode session stores, lists available sessions, and emits a clean context bundle that can be loaded into another agent session. Go docs: [pkg.go.dev/github.com/muthuishere/crossmemcli](https://pkg.go.dev/github.com/muthuishere/crossmemcli).
 
 It is primarily a fast local context CLI. Skills are optional global integration points for agents that support `SKILL.md`.
 
