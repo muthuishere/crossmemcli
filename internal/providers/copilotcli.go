@@ -15,23 +15,24 @@ import (
 // (cwd = working dir, summary = title) and a denormalized `turns` table with one
 // user_message / assistant_response pair per row. The sibling auth.db and the
 // config/* state files are never read.
-const copilotCLIDBPath = "~/.copilot/session-store.db"
-
-func openCopilotCLIDB() (*sql.DB, os.FileInfo, error) {
-	dbPath := expandHome(copilotCLIDBPath)
+func openCopilotCLIDB() (*sql.DB, os.FileInfo, string, error) {
+	dbPath := storePath("copilot-cli", "sqlite-sessions")
+	if dbPath == "" {
+		return nil, nil, "", os.ErrNotExist
+	}
 	info, err := os.Stat(dbPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(250)")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
-	return db, info, nil
+	return db, info, dbPath, nil
 }
 
 func listCopilotCLI(limit int, cwdFilter string) ([]Session, error) {
-	db, info, err := openCopilotCLIDB()
+	db, info, dbPath, err := openCopilotCLIDB()
 	if err != nil {
 		return nil, nil
 	}
@@ -57,7 +58,7 @@ func listCopilotCLI(limit int, cwdFilter string) ([]Session, error) {
 			Provider:  "copilot-cli",
 			ID:        id,
 			Ref:       "copilot-cli:" + id,
-			Path:      info.Name(),
+			Path:      dbPath,
 			Bytes:     info.Size(),
 			Modified:  parseTimeFlexible(updated.String),
 			Workspace: cwd.String,
@@ -72,7 +73,7 @@ func listCopilotCLI(limit int, cwdFilter string) ([]Session, error) {
 }
 
 func loadCopilotCLISession(id string) (Session, error) {
-	db, info, err := openCopilotCLIDB()
+	db, info, dbPath, err := openCopilotCLIDB()
 	if err != nil {
 		return Session{}, err
 	}
@@ -87,7 +88,7 @@ func loadCopilotCLISession(id string) (Session, error) {
 		Provider:  "copilot-cli",
 		ID:        id,
 		Ref:       "copilot-cli:" + id,
-		Path:      info.Name(),
+		Path:      dbPath,
 		Bytes:     info.Size(),
 		Modified:  parseTimeFlexible(updated.String),
 		Workspace: cwd.String,
@@ -99,7 +100,7 @@ func copilotCLIPreview(sessionID string, maxChars int) string {
 	if sessionID == "" {
 		return ""
 	}
-	db, _, err := openCopilotCLIDB()
+	db, _, _, err := openCopilotCLIDB()
 	if err != nil {
 		diag.Debugf("copilot-cli preview open err=%q", err)
 		return ""

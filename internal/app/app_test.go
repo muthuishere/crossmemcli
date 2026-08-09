@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/muthuishere/crossmemcli/internal/providers"
 )
 
 func TestHelpCommand(t *testing.T) {
@@ -37,5 +39,30 @@ func TestSkillsSubcommandRemoved(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `unknown command "skills"`) {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// The --provider help text is hand-written, so it can silently fall behind
+// when a provider is added. Every provider the engine knows must appear in it.
+func TestProviderHelpListsEveryProvider(t *testing.T) {
+	for _, help := range map[string]string{"list": listHelpText, "load": loadHelpText, "update": updateHelpText} {
+		for _, provider := range providers.Providers() {
+			if !strings.Contains(help, provider) {
+				t.Fatalf("help text does not mention provider %q:\n%s", provider, help)
+			}
+		}
+	}
+}
+
+func TestConfigCommandReportsStores(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := Run([]string{"config"}, &stdout, &stderr); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{"config:", "devin:sqlite-sessions", "devin-gui:vscode-workspace-storage", "looks in:"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("config output missing %q:\n%s", want, out)
+		}
 	}
 }

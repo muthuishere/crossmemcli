@@ -160,7 +160,7 @@ func renderBundle(sessions []Session, bodies []string, opts ListOptions) string 
 // tool (including Copilot) was covered.
 func searchedProviders(provider string) string {
 	if provider == "" || provider == "all" {
-		return "claude, codex, copilot, copilot-cli, devin, opencode"
+		return strings.Join(Providers(), ", ")
 	}
 	return provider
 }
@@ -217,12 +217,14 @@ func extractJSONLText(raw []byte, provider string) string {
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return ""
 	}
-	switch provider {
-	case "codex":
+	switch {
+	case provider == "codex":
 		return extractCodex(obj)
-	case "claude":
+	case provider == "claude":
 		return extractClaude(obj)
-	case "copilot":
+	// The Devin desktop app is a VS Code fork, so its chat journal parses with
+	// the same reader as Copilot in VS Code.
+	case isVSCodeChat(provider):
 		return extractCopilot(obj)
 	default:
 		return ""
@@ -334,7 +336,10 @@ func devinPreview(sessionID string, maxChars int) string {
 	if sessionID == "" {
 		return ""
 	}
-	dbPath := expandHome("~/.local/share/devin/cli/sessions.db")
+	dbPath := devinDB()
+	if dbPath == "" {
+		return ""
+	}
 	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(250)")
 	if err != nil {
 		diag.Debugf("devin preview open db=%q err=%q", dbPath, err)

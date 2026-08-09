@@ -5,22 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
-// OpenCode (sst/opencode) keeps sessions in SQLite under ~/.local/share/opencode.
-// A stable build writes opencode.db; dev/local builds use opencode-dev.db /
+// OpenCode (sst/opencode) keeps sessions in SQLite under its data directory —
+// ~/.local/share/opencode on Linux/macOS, %APPDATA%\opencode on Windows. A
+// stable build writes opencode.db; dev/local builds use opencode-dev.db /
 // opencode-local.db. We read whichever exist (read-only) and never touch the
 // sibling auth.json / credential / account tables.
 func openCodeDBs() []string {
-	matches, err := filepath.Glob(expandHome("~/.local/share/opencode/opencode*.db"))
-	if err != nil {
-		return nil
-	}
-	return matches
+	return storePaths("opencode", "sqlite-sessions")
 }
 
 func listOpenCode(limit int, cwdFilter string) ([]Session, error) {

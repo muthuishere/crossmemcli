@@ -11,13 +11,24 @@ import (
 func DiscoverStores() ([]Store, error) {
 	stores := make([]Store, 0, len(storeDefinitions))
 	for _, def := range storeDefinitions {
-		path := expandHome(def.Path)
-		info, err := os.Stat(path)
-		store := Store{Provider: def.Provider, Kind: def.Kind, Path: path, Exists: err == nil, Note: def.Note}
-		if err != nil && !os.IsNotExist(err) {
-			diag.Debugf("scan stat provider=%s kind=%s path=%q err=%q", def.Provider, def.Kind, path, err)
+		// A store can resolve to several real paths (OpenCode's stable/dev/local
+		// databases), to exactly one, or to none when the tool is not installed.
+		// Report one line per real path, or a single line naming the location
+		// this platform would use.
+		paths := storePaths(def.Provider, def.Kind)
+		if len(paths) == 0 {
+			stores = append(stores, Store{Provider: def.Provider, Kind: def.Kind, Path: displayCandidate(def.Provider, def.Kind), Exists: false, Note: def.Note})
+			continue
 		}
-		if err == nil {
+		for _, path := range paths {
+			store := Store{Provider: def.Provider, Kind: def.Kind, Path: path, Exists: true, Note: def.Note}
+			info, err := os.Stat(path)
+			if err != nil {
+				diag.Debugf("scan stat provider=%s kind=%s path=%q err=%q", def.Provider, def.Kind, path, err)
+				store.Exists = false
+				stores = append(stores, store)
+				continue
+			}
 			size := info.Size()
 			store.Bytes = &size
 			if info.IsDir() {
@@ -25,8 +36,8 @@ func DiscoverStores() ([]Store, error) {
 				store.Files = &files
 				store.Bytes = &bytes
 			}
+			stores = append(stores, store)
 		}
-		stores = append(stores, store)
 	}
 	return stores, nil
 }

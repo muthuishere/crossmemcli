@@ -4,7 +4,7 @@
 
 Portable context memory across local agent tools.
 
-`crossmem` discovers local Claude Code, Codex, Devin, Copilot (VS Code and CLI), and OpenCode session stores, lists available sessions, and emits a clean context bundle that can be loaded into another agent session. Go docs: [pkg.go.dev/github.com/muthuishere/crossmemcli](https://pkg.go.dev/github.com/muthuishere/crossmemcli).
+`crossmem` discovers local Claude Code, Codex, Devin (CLI and desktop), Copilot (VS Code and CLI), and OpenCode session stores, lists available sessions, and emits a clean context bundle that can be loaded into another agent session. Go docs: [pkg.go.dev/github.com/muthuishere/crossmemcli](https://pkg.go.dev/github.com/muthuishere/crossmemcli).
 
 It is primarily a fast local context CLI. Skills are optional global integration points for agents that support `SKILL.md`.
 
@@ -85,11 +85,48 @@ crossmem help list
 | Codex | `~/.codex/sessions/YYYY/MM/DD/*.jsonl` | Session JSONL files. |
 | Codex | `~/.codex/logs_2.sqlite` | Structured log database. |
 | Codex | `~/.codex/history.jsonl` | Prompt history. |
-| Copilot in VS Code | `~/Library/Application Support/Code/User/workspaceStorage/<id>/chatSessions/*.jsonl` | VS Code chat session JSONL files. |
-| Copilot in VS Code | `~/Library/Application Support/Code/User/workspaceStorage/<id>/GitHub.copilot-chat/transcripts/*.jsonl` | Copilot transcript JSONL files where available. |
-| Devin CLI | `~/.local/share/devin/cli/sessions.db` | SQLite DB with `sessions`, `prompt_history`, `message_nodes`, `rendered_commits`, and `tool_call_state`. |
-| Devin CLI | `~/.local/share/devin/cli/logs/*.log` | CLI logs. Primary resumable conversation content is in `sessions.db`. |
+| Copilot in VS Code | `<code-user>/workspaceStorage/<id>/chatSessions/*.jsonl` | VS Code chat session JSONL files. |
+| Copilot in VS Code | `<code-user>/workspaceStorage/<id>/GitHub.copilot-chat/transcripts/*.jsonl` | Copilot transcript JSONL files where available. |
+| Copilot CLI | `~/.copilot/session-store.db` | SQLite DB with `sessions` and a denormalized `turns` table. |
+| Devin CLI | `<devin-cli>/sessions.db` | SQLite DB with `sessions`, `prompt_history`, `message_nodes`, `rendered_commits`, and `tool_call_state`. |
+| Devin CLI | `<devin-cli>/logs/*.log` | CLI logs. Primary resumable conversation content is in `sessions.db`. |
 | Devin CLI | `~/.local/share/devin/credentials.toml` | Credentials file. Deliberately not read by this tool. |
+| Devin desktop | `<devin-user>/workspaceStorage/<id>/chatSessions/*.jsonl` | The desktop app is a VS Code fork (formerly Windsurf), so its chat is read exactly like VS Code's. |
+| Devin desktop | `~/.devin`, `~/.windsurf` | Home data folder. Cascade conversation blobs are a private binary format; reported by `scan`, not extracted. |
+| OpenCode | `<opencode-data>/opencode*.db` | SQLite DB with `session`, `message`, and `part` tables. |
+
+Store locations differ per platform, and `crossmem` knows all of them:
+
+| Placeholder | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| `<devin-cli>` | `~/.local/share/devin/cli` | `~/.local/share/devin/cli` | `%APPDATA%\Cognition\cli` |
+| `<opencode-data>` | `~/.local/share/opencode` | `~/.local/share/opencode` | `%APPDATA%\opencode` |
+| `<code-user>` | `~/Library/Application Support/Code/User` | `~/.config/Code/User` | `%APPDATA%\Code\User` |
+| `<devin-user>` | `~/Library/Application Support/Devin/User` | `~/.config/Devin/User` | `%APPDATA%\Devin\User` |
+
+Claude Code, Codex, and the Copilot CLI use the same `~`-relative paths on every platform; `$CLAUDE_CONFIG_DIR` and `$CODEX_HOME` are honored and win when set. `%LOCALAPPDATA%`, `$XDG_DATA_HOME`, VS Code Insiders, and the pre-rename Windsurf folders are all checked too. Run `crossmem config` for the exact list on your machine.
+
+## Store Overrides
+
+Run `crossmem config` to see, per store, the paths `crossmem` looks in and which ones it found. When a tool keeps its sessions somewhere else — a portable install, a second drive, a custom data directory — point `crossmem` at it in `~/.config/crossmemcli/config.json` (override the file location with `$CROSSMEM_CONFIG`):
+
+```json
+{
+  "stores": {
+    "devin:sqlite-sessions": "D:/agents/Cognition/cli/sessions.db",
+    "claude": ["~/work/.claude/projects"]
+  },
+  "extraStores": {
+    "opencode": "~/other/opencode/opencode*.db"
+  }
+}
+```
+
+- `stores` replaces a store's built-in locations; `extraStores` keeps them and adds more.
+- Keys are `provider:kind` (as printed by `crossmem scan`), or a bare `provider` for that provider's primary store.
+- Values are a path string or a list of them. `~`, `%VAR%`, `$VAR`, and `*` globs are expanded, and a path whose variable is unset on the current machine is skipped — so one config file can be shared across machines.
+
+`crossmem config --init` writes a starter file.
 
 ## Safety
 
@@ -160,7 +197,7 @@ Pass `--agents` to force the agents target even when `codex` is not on `PATH`:
 crossmem install --skills --agents
 ```
 
-`crossmem` does not install repo-local skills by default. The product is a global, cross-repo context layer for Claude Code, Codex, Devin, Copilot (VS Code and CLI), OpenCode, and spawned agent processes that need to ask "what context exists for this folder?".
+`crossmem` does not install repo-local skills by default. The product is a global, cross-repo context layer for Claude Code, Codex, Devin (CLI and desktop), Copilot (VS Code and CLI), OpenCode, and spawned agent processes that need to ask "what context exists for this folder?".
 
 ## Context Update
 

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -58,9 +59,9 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 	}
 
 	for _, root := range providerRoots(opts.Provider) {
-		jsonl, err := listJSONL(root, opts.Provider)
+		jsonl, err := listJSONL(root.Path, root.Provider)
 		if err != nil {
-			diag.Debugf("list jsonl root=%q provider=%s err=%q", root, opts.Provider, err)
+			diag.Debugf("list jsonl root=%q provider=%s err=%q", root.Path, root.Provider, err)
 			continue
 		}
 		if opts.CWD != "" {
@@ -107,7 +108,10 @@ func listJSONL(root string, provider string) ([]Session, error) {
 			}
 			return nil
 		}
-		if inferProvider(path, provider) == "copilot" && !isCopilotSessionPath(path) {
+		// A VS Code workspaceStorage tree holds far more JSONL than chat; keep
+		// only the chat transcripts. This applies to every fork of it, not just
+		// Copilot in VS Code.
+		if isWorkspaceStoragePath(path) && !isCopilotSessionPath(path) {
 			return nil
 		}
 		info, err := d.Info()
@@ -200,8 +204,18 @@ func readJSONLMeta(path string, provider string) (title string, cwd string) {
 	return title, cwd
 }
 
+// devinDB is the Devin CLI session database on this machine: the XDG data dir
+// on Linux/macOS, roaming AppData\Cognition on Windows, or wherever the user
+// config repoints it. Empty when Devin is not installed here.
+func devinDB() string {
+	return storePath("devin", "sqlite-sessions")
+}
+
 func listDevin(limit int, cwdFilter string) ([]Session, error) {
-	dbPath := expandHome("~/.local/share/devin/cli/sessions.db")
+	dbPath := devinDB()
+	if dbPath == "" {
+		return nil, nil
+	}
 	info, err := os.Stat(dbPath)
 	if err != nil {
 		return nil, nil
@@ -250,7 +264,10 @@ func listDevin(limit int, cwdFilter string) ([]Session, error) {
 
 // loadDevinSession fetches one Devin session by id for load --session devin:<id>.
 func loadDevinSession(id string) (Session, error) {
-	dbPath := expandHome("~/.local/share/devin/cli/sessions.db")
+	dbPath := devinDB()
+	if dbPath == "" {
+		return Session{}, fmt.Errorf("devin session %q: no Devin session store found on this machine", id)
+	}
 	info, err := os.Stat(dbPath)
 	if err != nil {
 		return Session{}, err
@@ -292,9 +309,11 @@ func sameOrChild(value string, root string) bool {
 	if !filepath.IsAbs(value) || !filepath.IsAbs(root) {
 		return false
 	}
-	valueAbs := filepath.Clean(value)
-	rootAbs := filepath.Clean(root)
-	if valueAbs == rootAbs {
+	// Case is folded on Windows before comparing: the two sides come from
+	// different tools, and they disagree on drive-letter and folder case.
+	valueAbs := normalizeCase(filepath.Clean(value))
+	rootAbs := normalizeCase(filepath.Clean(root))
+	if pathsEqual(valueAbs, rootAbs) {
 		return true
 	}
 	rel, err := filepath.Rel(rootAbs, valueAbs)
@@ -312,31 +331,54 @@ func unixFlexible(value int64) time.Time {
 }
 
 func isCopilotSessionPath(path string) bool {
-	return strings.Contains(path, "/chatSessions/") || strings.Contains(path, "/GitHub.copilot-chat/transcripts/")
+	slashed := filepath.ToSlash(path)
+	return strings.Contains(slashed, "/chatSessions/") || strings.Contains(slashed, "/GitHub.copilot-chat/transcripts/")
 }
 
 func inferWorkspace(path string, provider string) string {
+	// Keyed on the store's shape first: every VS Code fork records the real
+	// folder in workspaceStorage/<id>/workspace.json, whoever ships it.
+	if isWorkspaceStoragePath(path) {
+		parts := strings.Split(filepath.ToSlash(path), "/workspaceStorage/")
+		if len(parts) == 2 {
+			id := strings.Split(parts[1], "/")[0]
+			wsFile := filepath.Join(filepath.FromSlash(parts[0]), "workspaceStorage", id, "workspace.json")
+			return readCopilotFolder(wsFile)
+		}
+		return ""
+	}
 	switch provider {
 	case "claude":
-		dir := filepath.Base(filepath.Dir(path))
-		if strings.HasPrefix(dir, "-") {
-			return strings.ReplaceAll(dir, "-", "/")
-		}
-		return dir
+		return decodeClaudeDir(filepath.Base(filepath.Dir(path)))
 	case "codex":
-		root := expandHome("~/.codex/sessions")
+		root := storePath("codex", "jsonl-sessions")
+		if root == "" {
+			root = expandPath("~/.codex/sessions")
+		}
 		if rel, err := filepath.Rel(root, filepath.Dir(path)); err == nil {
 			return rel
 		}
-	case "copilot":
-		parts := strings.Split(path, "/workspaceStorage/")
-		if len(parts) == 2 {
-			id := strings.Split(parts[1], "/")[0]
-			wsFile := filepath.Join(parts[0], "workspaceStorage", id, "workspace.json")
-			return readCopilotFolder(wsFile)
-		}
 	}
 	return ""
+}
+
+// claudeWindowsDir matches the Windows form of a Claude Code project directory,
+// where the drive letter survives as "C--" ahead of the dash-joined path.
+var claudeWindowsDir = regexp.MustCompile(`^([A-Za-z])--(.*)$`)
+
+// decodeClaudeDir turns Claude Code's encoded project directory back into a
+// working directory: every separator was replaced by "-", so /Users/x/repo is
+// stored as -Users-x-repo and C:\Users\x\repo as C--Users-x-repo. Decoding is
+// lossy when a real folder name contains a dash, which is why this is only the
+// fallback for transcripts that carry no cwd line.
+func decodeClaudeDir(dir string) string {
+	if match := claudeWindowsDir.FindStringSubmatch(dir); match != nil {
+		return match[1] + `:\` + strings.ReplaceAll(match[2], "-", `\`)
+	}
+	if strings.HasPrefix(dir, "-") {
+		return strings.ReplaceAll(dir, "-", "/")
+	}
+	return dir
 }
 
 // readCopilotFolder resolves the real project folder for a VS Code Copilot
@@ -355,7 +397,14 @@ func readCopilotFolder(wsFile string) string {
 	}
 	uri := strings.TrimPrefix(ws.Folder, "file://")
 	if decoded, err := url.PathUnescape(uri); err == nil {
-		return decoded
+		uri = decoded
+	}
+	// A Windows folder arrives as file:///c%3A/Users/... which unescapes to
+	// "/c:/Users/..."; drop the leading slash so it is a real path again.
+	if windowsFileURIPath.MatchString(uri) {
+		uri = strings.TrimPrefix(uri, "/")
 	}
 	return uri
 }
+
+var windowsFileURIPath = regexp.MustCompile(`^/[A-Za-z]:[/\\]`)

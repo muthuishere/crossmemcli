@@ -23,13 +23,14 @@ Options:
   -h, --help                              display help for command
 
 Commands:
-  scan [options]                          discover local Claude, Codex, Devin, and Copilot stores
+  scan [options]                          discover local agent session stores on this machine
   list [options]                          list available sessions across stores
   sessions [options]                      alias for list
   load [options] [folder]                 print a portable context bundle for a repo or folder
   context [options] [folder]              alias for load
   update [options] [folder]               write .crossmem/context.md and source manifests
   guardrails [folder]                     print active repo instruction file references
+  config [options]                        show where each store is looked for, and override it
   install --skills [options]              install the global crossmem-loader skill
   uninstall --skills [options]            remove the global crossmem-loader skill
   help [command]                          display help for command
@@ -64,7 +65,8 @@ List available local sessions, most recent first. Pass a folder (positional or
 across all tools — useful for picking which recent session to load.
 
 Options:
-  --provider <name>                       claude, codex, copilot, devin, or all (default: all)
+  --provider <name>                       claude, codex, copilot, copilot-cli, devin, devin-gui,
+                                          opencode, or all (default: all)
   --folder <path>                         only show sessions whose working directory is this folder
   --limit <number>                        maximum sessions to print (default: 50)
   --json                                  print sessions as JSON
@@ -84,7 +86,8 @@ history and references active repo instruction files; the consuming agent decide
 to summarize or request more context.
 
 Options:
-  --provider <name>                       claude, codex, copilot, devin, or all (default: all)
+  --provider <name>                       claude, codex, copilot, copilot-cli, devin, devin-gui,
+                                          opencode, or all (default: all)
   --limit <number>                        maximum sessions to include (default: 10)
   --full                                  emit fuller per-session excerpts instead of the compact summary
   --session <ref>                         load one specific session by its handle from list
@@ -113,7 +116,8 @@ Files:
   sources.json                            discovered store and instruction metadata
 
 Options:
-  --provider <name>                       claude, codex, copilot, devin, or all (default: all)
+  --provider <name>                       claude, codex, copilot, copilot-cli, devin, devin-gui,
+                                          opencode, or all (default: all)
   --limit <number>                        maximum sessions to include (default: 10)
   -h, --help                              display help for command
 
@@ -135,6 +139,46 @@ Looks for:
 Examples:
   crossmem guardrails
   crossmem guardrails /path/to/repo
+`
+
+const configHelpText = `Usage: crossmem config [options]
+
+Show the config file location and, for every store, the paths crossmem looks in
+on this machine and which of them exist. Use it to check a store was found, or
+to see the exact key to override when a tool keeps its sessions somewhere else.
+
+crossmem already knows the macOS, Linux, and Windows locations of each store
+(Devin, for example, is ~/.local/share/devin/cli/sessions.db on macOS and Linux
+and %APPDATA%\Cognition\cli\sessions.db on Windows). The config file is for the
+cases it cannot know: a portable install, a second drive, a custom data dir.
+
+File: ~/.config/crossmemcli/config.json    (override with $CROSSMEM_CONFIG)
+
+  {
+    "stores": {
+      "devin:sqlite-sessions": "D:/agents/Cognition/cli/sessions.db",
+      "claude": ["~/work/.claude/projects"]
+    },
+    "extraStores": {
+      "opencode": "~/other/opencode/opencode*.db"
+    }
+  }
+
+  stores        replaces the built-in locations for that store
+  extraStores   keeps the built-in locations and adds more
+  keys          "provider:kind", or a bare "provider" for its primary store
+  values        a path string or a list of them; ~, %VAR%, $VAR and * globs
+                are expanded, and a path whose variable is unset is skipped
+
+Options:
+  --init                                  write a starter config file if none exists
+  --json                                  print resolved stores as JSON
+  -h, --help                              display help for command
+
+Examples:
+  crossmem config
+  crossmem config --init
+  crossmem config --json
 `
 
 const installHelpText = `Usage: crossmem install --skills [options]
@@ -193,6 +237,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) error {
 		return runGuardrails(args[1:], stdout)
 	case "update":
 		return runUpdate(args[1:], stdout)
+	case "config":
+		return runConfig(args[1:], stdout)
 	case "install":
 		return runTopLevelSkillAction("install", args[1:], stdout, stderr)
 	case "uninstall":
@@ -227,6 +273,8 @@ func commandHelp(command string) (string, bool) {
 		return updateHelpText, true
 	case "guardrails":
 		return guardrailsHelpText, true
+	case "config":
+		return configHelpText, true
 	case "install":
 		return installHelpText, true
 	case "uninstall":
@@ -288,6 +336,67 @@ func runUpdate(args []string, stdout io.Writer) error {
 	}
 	for _, path := range result.Paths {
 		fmt.Fprintf(stdout, "Wrote %s\n", path)
+	}
+	return nil
+}
+
+func runConfig(args []string, stdout io.Writer) error {
+	if isHelpRequest(args) {
+		_, _ = fmt.Fprint(stdout, configHelpText)
+		return nil
+	}
+	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	initFlag := fs.Bool("init", false, "write a starter config file")
+	jsonOut := fs.Bool("json", false, "print JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *initFlag {
+		path, created, err := providers.InitConfig()
+		if err != nil {
+			return err
+		}
+		if created {
+			fmt.Fprintf(stdout, "Wrote %s\n", path)
+		} else {
+			fmt.Fprintf(stdout, "Config already exists at %s\n", path)
+		}
+		return nil
+	}
+
+	// A malformed config is reported here rather than swallowed, because this is
+	// the command someone runs when their override is not taking effect.
+	config, loadErr := providers.LoadConfig()
+	stores := providers.EffectiveStores()
+	if *jsonOut {
+		payload := struct {
+			Config providers.Config           `json:"config"`
+			Error  string                     `json:"error,omitempty"`
+			Stores []providers.StoreCandidate `json:"stores"`
+		}{Config: config, Stores: stores}
+		if loadErr != nil {
+			payload.Error = loadErr.Error()
+		}
+		return writeJSON(stdout, payload)
+	}
+
+	fmt.Fprintf(stdout, "config: %s\n", config.Path)
+	fmt.Fprintf(stdout, "exists: %t\n", config.Exists)
+	if loadErr != nil {
+		fmt.Fprintf(stdout, "error:  %v (ignored; built-in locations in use)\n", loadErr)
+	}
+	fmt.Fprintln(stdout)
+	for _, store := range stores {
+		found := "not found"
+		if len(store.Resolved) > 0 {
+			found = strings.Join(store.Resolved, ", ")
+		}
+		fmt.Fprintf(stdout, "%s\n", store.Key)
+		fmt.Fprintf(stdout, "  found: %s\n", found)
+		for _, candidate := range store.Sources {
+			fmt.Fprintf(stdout, "  looks in: %s\n", candidate)
+		}
 	}
 	return nil
 }

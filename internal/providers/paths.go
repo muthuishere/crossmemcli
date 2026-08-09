@@ -3,65 +3,309 @@ package providers
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 )
 
+// storeDefinition declares one logical store once, with every OS-specific
+// location it is known to live in. Candidates are tried in order and every one
+// that exists on disk is used; a candidate referencing an environment variable
+// that is not set on this machine (%APPDATA% on macOS, $XDG_DATA_HOME on
+// Windows) drops out silently, so a single table covers macOS, Linux, and
+// Windows without runtime.GOOS branching.
+//
+// Primary marks the store a bare provider key in the user config refers to
+// (see config.go); providers with several kinds keep exactly one primary.
 type storeDefinition struct {
 	Provider string
 	Kind     string
-	Path     string
+	Paths    []string
+	Primary  bool
 	Note     string
 }
 
-var storeDefinitions = []storeDefinition{
-	{"claude", "jsonl-projects", "~/.claude/projects", "Claude Code transcript JSONL files and per-project memory directories."},
-	{"codex", "jsonl-sessions", "~/.codex/sessions", "Codex CLI session JSONL files grouped by date."},
-	{"codex", "sqlite-logs", "~/.codex/logs_2.sqlite", "Codex structured log database."},
-	{"codex", "jsonl-history", "~/.codex/history.jsonl", "Codex prompt history."},
-	{"copilot", "vscode-workspace-storage", "~/Library/Application Support/Code/User/workspaceStorage", "VS Code chatSessions and GitHub.copilot-chat transcript JSONL files."},
-	{"copilot", "zed-copilot", "~/Library/Application Support/Zed/copilot", "Zed Copilot language-server cache; not a chat transcript store by itself."},
-	{"devin", "sqlite-sessions", "~/.local/share/devin/cli/sessions.db", "Devin CLI SQLite session DB."},
-	{"devin", "cli-logs", "~/.local/share/devin/cli/logs", "Devin CLI logs. Session content primarily lives in sessions.db."},
-	{"opencode", "sqlite-sessions", "~/.local/share/opencode/opencode.db", "OpenCode SQLite session DB (also opencode-dev.db / opencode-local.db)."},
-	{"copilot-cli", "sqlite-sessions", "~/.copilot/session-store.db", "GitHub Copilot CLI SQLite session store."},
+// appDataRoots is the per-platform data directory an app named `app` uses:
+// XDG on Linux, Application Support on macOS, roaming and local AppData on
+// Windows. The ~/AppData forms are there for shells that do not export the
+// AppData variables.
+func appDataRoots(app string) []string {
+	return []string{
+		"~/.local/share/" + app,
+		"$XDG_DATA_HOME/" + app,
+		"~/Library/Application Support/" + app,
+		"%APPDATA%/" + app,
+		"%LOCALAPPDATA%/" + app,
+		"~/AppData/Roaming/" + app,
+		"~/AppData/Local/" + app,
+	}
 }
 
+// vscodeUserRoots is the "User" directory of a VS Code build (or fork) whose
+// Electron data folder is named `app` — where workspaceStorage lives. Every
+// fork keeps this layout, which is why the Devin desktop app is read the same
+// way as VS Code itself.
+func vscodeUserRoots(app string) []string {
+	return []string{
+		"~/Library/Application Support/" + app + "/User",
+		"%APPDATA%/" + app + "/User",
+		"~/AppData/Roaming/" + app + "/User",
+		"~/.config/" + app + "/User",
+	}
+}
+
+// devinCLIRoots is the Devin CLI's store directory. Linux/macOS use the XDG
+// data dir; the Windows build ships under the Cognition vendor folder in
+// roaming AppData.
+var devinCLIRoots = append(
+	appDataRoots("devin/cli"),
+	"%APPDATA%/Cognition/cli",
+	"%LOCALAPPDATA%/Cognition/cli",
+	"~/AppData/Roaming/Cognition/cli",
+	"~/AppData/Local/Cognition/cli",
+	"~/.local/share/Cognition/cli",
+)
+
+// The Devin desktop app is a VS Code fork (product.json: nameLong "Devin",
+// dataFolderName ".devin", formerly Windsurf), so its chat transcripts sit in
+// the standard workspaceStorage layout under a "Devin" data folder.
+var devinDesktopRoots = append(vscodeUserRoots("Devin"), vscodeUserRoots("Windsurf")...)
+
+var vscodeCopilotRoots = append(vscodeUserRoots("Code"), vscodeUserRoots("Code - Insiders")...)
+
+var storeDefinitions = []storeDefinition{
+	// $CLAUDE_CONFIG_DIR / $CODEX_HOME come first: when a user has moved the
+	// config dir, that is where the sessions really are.
+	{"claude", "jsonl-projects", []string{"$CLAUDE_CONFIG_DIR/projects", "~/.claude/projects"}, true, "Claude Code transcript JSONL files and per-project memory directories. Same path on every OS ($CLAUDE_CONFIG_DIR wins when set)."},
+	{"codex", "jsonl-sessions", []string{"$CODEX_HOME/sessions", "~/.codex/sessions"}, true, "Codex CLI session JSONL files grouped by date. Same path on every OS ($CODEX_HOME wins when set)."},
+	{"codex", "sqlite-logs", []string{"$CODEX_HOME/logs_2.sqlite", "~/.codex/logs_2.sqlite"}, false, "Codex structured log database."},
+	{"codex", "jsonl-history", []string{"$CODEX_HOME/history.jsonl", "~/.codex/history.jsonl"}, false, "Codex prompt history."},
+	{"copilot", "vscode-workspace-storage", under(vscodeCopilotRoots, "workspaceStorage"), true, "VS Code chatSessions and GitHub.copilot-chat transcript JSONL files (stable and Insiders)."},
+	{"copilot", "zed-copilot", under(appDataRoots("Zed"), "copilot"), false, "Zed Copilot language-server cache; not a chat transcript store by itself."},
+	{"copilot-cli", "sqlite-sessions", []string{"~/.copilot/session-store.db"}, true, "GitHub Copilot CLI SQLite session store. Home-relative on every OS."},
+	{"devin", "sqlite-sessions", under(devinCLIRoots, "sessions.db"), true, "Devin CLI SQLite session DB."},
+	{"devin", "cli-logs", under(devinCLIRoots, "logs"), false, "Devin CLI logs. Session content primarily lives in sessions.db."},
+	{"devin-gui", "vscode-workspace-storage", under(devinDesktopRoots, "workspaceStorage"), true, "Devin desktop app (VS Code fork, formerly Windsurf) chat session JSONL files."},
+	{"devin-gui", "desktop-data", []string{"~/.devin", "~/.windsurf"}, false, "Devin desktop home data folder. Cascade conversation blobs live here in a private binary format; crossmem reports it but does not extract from it."},
+	{"opencode", "sqlite-sessions", under(appDataRoots("opencode"), "opencode*.db"), true, "OpenCode SQLite session DB (also opencode-dev.db / opencode-local.db)."},
+}
+
+func under(roots []string, leaf string) []string {
+	paths := make([]string, 0, len(roots))
+	for _, root := range roots {
+		paths = append(paths, root+"/"+leaf)
+	}
+	return paths
+}
+
+// Providers lists every provider crossmem knows, for --provider help and for
+// naming the stores a bundle searched.
+func Providers() []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, def := range storeDefinitions {
+		if !seen[def.Provider] {
+			seen[def.Provider] = true
+			names = append(names, def.Provider)
+		}
+	}
+	return names
+}
+
+func homeDir() string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home
+	}
+	return os.Getenv("HOME")
+}
+
+// expandHome resolves a leading ~ only. It is used for user-supplied folder
+// arguments and for workspace paths read out of another tool's store, which
+// must never be reinterpreted as environment references.
 func expandHome(path string) string {
 	if path == "~" {
-		return os.Getenv("HOME")
+		return homeDir()
 	}
-	if strings.HasPrefix(path, "~/") {
-		return os.Getenv("HOME") + path[1:]
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
+		return filepath.Join(homeDir(), path[2:])
 	}
 	return path
 }
 
-func providerRoots(provider string) []string {
-	roots := []string{}
+var winEnvPattern = regexp.MustCompile(`%([A-Za-z_][A-Za-z0-9_]*)%`)
+var shEnvPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
+
+// expandPath resolves ~, %VAR%, and $VAR / ${VAR} in a store path candidate.
+// It returns "" when the candidate names an environment variable that is unset
+// here — that is how a Windows-only candidate disappears on macOS instead of
+// collapsing into a bogus path rooted at "/".
+func expandPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	resolved := true
+	substitute := func(name string) string {
+		value := os.Getenv(name)
+		if value == "" {
+			resolved = false
+		}
+		return value
+	}
+	path = winEnvPattern.ReplaceAllStringFunc(path, func(match string) string {
+		return substitute(match[1 : len(match)-1])
+	})
+	path = shEnvPattern.ReplaceAllStringFunc(path, func(match string) string {
+		return substitute(strings.Trim(match, "${}"))
+	})
+	if !resolved {
+		return ""
+	}
+	return filepath.Clean(expandHome(path))
+}
+
+// storeCandidates returns the raw (unexpanded) path candidates for a store,
+// with any user config override applied.
+func storeCandidates(provider string, kind string) []string {
+	def, ok := storeDefinitionFor(provider, kind)
+	if !ok {
+		return nil
+	}
+	return userConfig().candidatesFor(def)
+}
+
+func storeDefinitionFor(provider string, kind string) (storeDefinition, bool) {
+	for _, def := range storeDefinitions {
+		if def.Provider == provider && def.Kind == kind {
+			return def, true
+		}
+	}
+	return storeDefinition{}, false
+}
+
+// storePaths returns every location of a store that actually exists on this
+// machine, in candidate order and deduplicated. Candidates containing glob
+// metacharacters are expanded (OpenCode ships opencode.db / opencode-dev.db /
+// opencode-local.db side by side).
+func storePaths(provider string, kind string) []string {
+	var found []string
+	seen := map[string]bool{}
+	for _, candidate := range storeCandidates(provider, kind) {
+		expanded := expandPath(candidate)
+		if expanded == "" {
+			continue
+		}
+		var matches []string
+		if strings.ContainsAny(expanded, "*?[") {
+			matches, _ = filepath.Glob(expanded)
+		} else if _, err := os.Stat(expanded); err == nil {
+			matches = []string{expanded}
+		}
+		for _, match := range matches {
+			if seen[match] {
+				continue
+			}
+			seen[match] = true
+			found = append(found, match)
+		}
+	}
+	return found
+}
+
+// storePath returns the single best existing location for a store, or "" when
+// the tool is not installed here.
+func storePath(provider string, kind string) string {
+	paths := storePaths(provider, kind)
+	if len(paths) == 0 {
+		return ""
+	}
+	return paths[0]
+}
+
+// displayCandidate is the path shown by scan for a store with nothing on disk:
+// the first candidate that is meaningful on this platform.
+func displayCandidate(provider string, kind string) string {
+	candidates := storeCandidates(provider, kind)
+	for _, candidate := range candidates {
+		if expanded := expandPath(candidate); expanded != "" {
+			return expanded
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return ""
+}
+
+// providerRoot is one walkable transcript directory together with the provider
+// that owns it. The provider travels with the root because two providers can
+// share a directory shape — Copilot in VS Code and the Devin desktop app both
+// use workspaceStorage, and only the root they came from tells them apart.
+type providerRoot struct {
+	Provider string
+	Path     string
+}
+
+func providerRoots(provider string) []providerRoot {
+	roots := []providerRoot{}
 	for _, def := range storeDefinitions {
 		if provider != "all" && def.Provider != provider {
 			continue
 		}
 		switch def.Kind {
 		case "jsonl-projects", "jsonl-sessions", "vscode-workspace-storage":
-			roots = append(roots, expandHome(def.Path))
+			for _, path := range storePaths(def.Provider, def.Kind) {
+				roots = append(roots, providerRoot{Provider: def.Provider, Path: path})
+			}
 		}
 	}
 	return roots
 }
 
+// isWorkspaceStoragePath reports whether a transcript lives in the VS Code
+// workspaceStorage layout, shared by VS Code and every fork of it.
+func isWorkspaceStoragePath(path string) bool {
+	return strings.Contains(filepath.ToSlash(path), "/workspaceStorage/")
+}
+
+// inferProvider names the tool that owns a transcript path. The fallback is
+// the provider of the root it was found under; it is only guessed from the
+// path shape when a bare path arrives from `load --session`.
 func inferProvider(path string, fallback string) string {
 	if fallback != "" && fallback != "all" {
 		return fallback
 	}
+	slashed := filepath.ToSlash(path)
 	switch {
-	case strings.Contains(path, string(filepath.Separator)+".claude"+string(filepath.Separator)):
+	case strings.Contains(slashed, "/.claude/"):
 		return "claude"
-	case strings.Contains(path, string(filepath.Separator)+".codex"+string(filepath.Separator)):
+	case strings.Contains(slashed, "/.codex/"):
 		return "codex"
-	case strings.Contains(path, string(filepath.Separator)+"workspaceStorage"+string(filepath.Separator)):
+	case strings.Contains(slashed, "/Devin/User/"), strings.Contains(slashed, "/Windsurf/User/"):
+		return "devin-gui"
+	case strings.Contains(slashed, "/workspaceStorage/"):
 		return "copilot"
 	default:
 		return "unknown"
 	}
+}
+
+// isVSCodeChat reports whether a provider stores its chat in the VS Code
+// journal format, which decides both how a transcript is parsed and how its
+// workspace folder is resolved.
+func isVSCodeChat(provider string) bool {
+	return provider == "copilot" || provider == "devin-gui"
+}
+
+// normalizeCase folds a path's case on Windows, whose filesystem is
+// case-insensitive and whose tools disagree on it (VS Code writes
+// file:///c%3A/…, the shell reports C:\…). It is a no-op elsewhere.
+func normalizeCase(path string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(path)
+	}
+	return path
+}
+
+func pathsEqual(a string, b string) bool {
+	return normalizeCase(a) == normalizeCase(b)
 }
