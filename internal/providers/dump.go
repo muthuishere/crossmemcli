@@ -21,8 +21,9 @@ import (
 // clean break instead of a silent misread.
 const DumpSchema = "crossmem.dump.v1"
 
-// DefaultDumpDir is where `crossmem export` writes and `crossmem sync` pushes
-// from when neither a flag nor the config says otherwise.
+// DefaultDumpDir is where whole-machine `crossmem export` writes qa.jsonl, and
+// where `crossmem sync` pushes a store dump from, when neither a flag nor the
+// config says otherwise.
 func DefaultDumpDir() string {
 	if configured := userConfig().DumpDir; configured != "" {
 		return expandPath(configured)

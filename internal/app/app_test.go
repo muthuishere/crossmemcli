@@ -66,18 +66,38 @@ func TestExportImportSyncInHelp(t *testing.T) {
 	}
 }
 
-func TestExportHelpMentionsQA(t *testing.T) {
+func TestExportHelpIsQAOnly(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := Run([]string{"help", "export"}, &stdout, &stderr); err != nil {
 		t.Fatalf("help export: %v", err)
 	}
 	out := stdout.String()
-	if strings.Contains(out, "--raw") || strings.Contains(out, "raw.jsonl") {
-		t.Fatalf("export help still mentions raw:\n%s", out)
+	for _, leaked := range []string{"--qa", "--raw", "--dump", "raw.jsonl", "manifest.json"} {
+		if strings.Contains(out, leaked) {
+			t.Fatalf("export help still mentions %q:\n%s", leaked, out)
+		}
 	}
-	for _, want := range []string{"--qa", "qa.jsonl", "sessionId", "folder"} {
+	for _, want := range []string{"qa.jsonl", "sessionId", "folder", "import"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("export help missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestImportHelpIsQAOnly(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := Run([]string{"help", "import"}, &stdout, &stderr); err != nil {
+		t.Fatalf("help import: %v", err)
+	}
+	out := stdout.String()
+	for _, leaked := range []string{"restore a dump", "manifest.json", "--force"} {
+		if strings.Contains(out, leaked) {
+			t.Fatalf("import help still mentions %q:\n%s", leaked, out)
+		}
+	}
+	for _, want := range []string{"qa.jsonl", "--in", "--merge", "export"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("import help missing %q:\n%s", want, out)
 		}
 	}
 }

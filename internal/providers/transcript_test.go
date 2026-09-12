@@ -148,4 +148,24 @@ func TestExportConversationsWritesFullQA(t *testing.T) {
 			t.Fatalf("qa.jsonl leaked %q:\n%s", leaked, qa)
 		}
 	}
+
+	dest := filepath.Join(t.TempDir(), "imported")
+	imp, err := ImportConversations(ConvImportOptions{In: outDir, Out: dest})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if imp.Added != 1 {
+		t.Fatalf("imported %d, want 1", imp.Added)
+	}
+	got := readFile(t, imp.QAFile)
+	if got != qa {
+		t.Fatalf("imported file differs from export")
+	}
+	again, err := ImportConversations(ConvImportOptions{In: outDir, Out: dest, Merge: true})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if again.Added != 0 {
+		t.Fatalf("merge added %d, want 0", again.Added)
+	}
 }

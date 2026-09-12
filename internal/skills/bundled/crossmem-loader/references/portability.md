@@ -1,84 +1,59 @@
-# Moving agent memory between machines
+# Export / import conversations
 
-One dump format. `export` writes it, `import` restores it, `sync` moves it over
-rclone. The dump is a plain directory — no archive step — so what syncs is exactly
-what imports.
+`export` writes one `qa.jsonl`. `import` reads it back. That is the only
+export/import format — not a dump of original stores, not a raw jsonl of tokens
+or model names.
 
-## Export (this machine → a dump)
+Each line is a full exchange: sessionId, folder, question, answer, time, and
+`messages` (user / assistant / tool / thinking). No agent name, no model name,
+no tokens.
 
-```sh
-crossmem export                                # default dir
-crossmem export --out ~/.assets/convdump       # explicit
-crossmem export --provider claude --json       # one provider, manifest as JSON
-```
-
-Copies every discoverable store (Claude, Codex, Copilot, Copilot CLI, Devin,
-OpenCode) plus the well-known global instruction and memory files, into one
-directory with a `manifest.json`.
-
-Default dir is `dumpDir` from config, else `~/.assets/convdump`.
-
-**Credential files, auth databases, `*.env`, and vault/cache/node_modules dirs are
-never exported.** This is enforced in the CLI, not left to you — but still never
-add a path by hand that reaches into one.
-
-## Conversation export (training / RAG)
-
-A different file from the store dump. `--qa` writes one `qa.jsonl` of every
-question, the full answer, and the tools/results/thinking in between. No agent
-name, no model name, no tokens. Use this when the user wants a corpus, not a
-restoreable dump.
+## Export
 
 ```sh
-crossmem export --qa --out ~/conversations     # whole machine
-crossmem export --qa .                         # this folder only
-crossmem export --qa --dump --out ~/.assets/convdump
+crossmem export .                              # this folder → .crossmem/qa.jsonl
+crossmem export --out ~/conversations          # whole machine
+crossmem export --provider claude --json
 ```
 
-Each line is:
+Pass a folder to keep only sessions whose working directory is that folder.
+Omit it to export every session on the machine.
 
-```json
-{"sessionId":"...","folder":"/path","q":"...","a":"...","time":"...","messages":[{"role":"user","content":"..."},{"role":"assistant","content":"..."},{"role":"tool","name":"Write","content":"..."}]}
-```
+`--out` is the destination **directory**. Default is `<folder>/.crossmem` when a
+folder is passed, else `dumpDir` from config / `~/.assets/convdump`.
 
-`--qa` does not copy original stores. Add `--dump` when they also want the
-importable dump. Reads run in parallel; the file is renamed into place.
+Use this when the user wants a training corpus, a RAG corpus, or to carry
+conversations to another machine.
 
-## Sync (dump ↔ remote)
+## Import
 
 ```sh
-crossmem sync --remote hetzbox:companydata/convdump          # push
-crossmem sync --pull --remote hetzbox:companydata/convdump   # pull
-crossmem sync --prune ...                                    # mirror: delete extras at the destination
+crossmem import --in ~/conversations           # into dumpDir
+crossmem import . --in ~/conversations         # into ./.crossmem/qa.jsonl
+crossmem import . --in ~/conversations/qa.jsonl --merge --dry-run
 ```
 
-Needs the `rclone` binary on PATH. With no `--remote`, it uses `sync.remote` from
-the config. `--prune` deletes destination files absent from the source — confirm
-with the user before using it against a remote that holds their only copy.
+`--in` may be the `qa.jsonl` file or a directory that contains one. `--merge`
+appends pairs that are not already in the destination. `--dry-run` reports
+counts without writing.
 
-## Import (dump → this machine)
-
-```sh
-crossmem import --in ~/.assets/convdump --dry-run   # always do this first
-crossmem import --in ~/.assets/convdump
-```
-
-Each store resolves to **this** machine's location, honouring the local config —
-so a dump made on a Mac restores into the right Windows or Linux paths. Files whose
-bytes already match are skipped, so re-imports are idempotent. `--force` overwrites
-even identical files; it is rarely what you want.
-
-**Always `--dry-run` first** and show the user what it reports. Import writes into
-other tools' live session stores; that is worth one confirmation.
+Always `--dry-run` first if the destination already has a corpus, and show the
+user what it reports.
 
 ## The whole trip
 
 ```sh
 # on the old machine
-crossmem export && crossmem sync --remote hetzbox:companydata/convdump
+crossmem export --out ~/conversations
+
+# copy ~/conversations/qa.jsonl however they like
 
 # on the new machine
-crossmem sync --pull --remote hetzbox:companydata/convdump
-crossmem import --dry-run && crossmem import
-crossmem list . --limit 5      # the other machine's sessions are now local
+crossmem import . --in ~/conversations --dry-run
+crossmem import . --in ~/conversations
 ```
+
+## Store dump (`sync` only)
+
+Moving **original** session stores between machines is `sync`, not export/import.
+`sync` rclone-copies a store dump. Do not offer `export`/`import` for that.

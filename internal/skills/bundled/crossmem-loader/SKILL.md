@@ -1,6 +1,6 @@
 ---
 name: crossmem-loader
-description: Portable agent memory for a folder, via the crossmem CLI — it reads the local session stores of Claude Code, Codex, Devin (CLI and desktop), Copilot (VS Code and CLI), and OpenCode. Use it FIRST, before listing or reading files, for (1) RESUMING — pick up where I left off, resume, continue where I was, what was I doing here, where did I leave off, catch me up on this folder, load context, load my last session, resume from another agent/tool, I hit a usage limit in Codex/Claude, import Claude/Codex/Devin/Copilot/OpenCode memory; (2) PERSISTING — save this context, write a context file, commit the context, so the next session doesn't re-pay for this; (3) MOVING MACHINES — carry my sessions to my other laptop, export/import/sync my agent memory, back up my agent history, restore my sessions, push my dump to a remote; (4) TRAINING / RAG — export all sessions as Q&A, dump every conversation to jsonl, training corpus of my agent history, no model names; (5) DIAGNOSING — crossmem can't see my Codex/Devin sessions, no sessions found, where does it look for X, my tool keeps its sessions somewhere else.
+description: Portable agent memory for a folder, via the crossmem CLI — it reads the local session stores of Claude Code, Codex, Devin (CLI and desktop), Copilot (VS Code and CLI), and OpenCode. Use it FIRST, before listing or reading files, for (1) RESUMING — pick up where I left off, resume, continue where I was, what was I doing here, where did I leave off, catch me up on this folder, load context, load my last session, resume from another agent/tool, I hit a usage limit in Codex/Claude, import Claude/Codex/Devin/Copilot/OpenCode memory; (2) PERSISTING — save this context, write a context file, commit the context, so the next session doesn't re-pay for this; (3) EXPORT / IMPORT — export all sessions as Q&A jsonl, import qa.jsonl, training corpus, RAG corpus, dump every conversation, no model names, carry conversations to another machine; (4) DIAGNOSING — crossmem can't see my Codex/Devin sessions, no sessions found, where does it look for X, my tool keeps its sessions somewhere else.
 ---
 
 # CrossMem
@@ -19,8 +19,7 @@ across tools, and guessing wastes the tokens it exists to save.
 |---|---|---|
 | Resume / catch up on this folder | The load flow below | this file |
 | Context that survives this session | `crossmem update .` | `references/persisting.md` |
-| Their history on another machine | `export` → `sync` → `import` | `references/portability.md` |
-| A training / RAG corpus of every session | `crossmem export --qa` | `references/portability.md` |
+| Export / import conversations (training, RAG, another machine) | `crossmem export` / `crossmem import` | `references/portability.md` |
 | "It can't find my sessions" | `crossmem scan`, then config | `references/troubleshooting.md` |
 | To know the repo's standing rules | `crossmem guardrails .` | Guardrails, below |
 
@@ -114,6 +113,5 @@ for; `load` and `update` already embed it in their bundles.
 ## Safety
 
 Never read credential files, `*.env`, auth databases, or `vault/` directories.
-crossmem already filters these out of every command including `export`, so a dump
-pushed to a remote carries no secret. Never paste a secret value into loaded
-context, and never echo one into a brief.
+`export` / `import` write a nameless `qa.jsonl` (no agent, no model, no tokens).
+Never paste a secret value into loaded context, and never echo one into a brief.

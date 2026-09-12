@@ -92,9 +92,10 @@ crossmem load .                                # context bundle for this repo
 crossmem load --session <handle> --full        # one chosen session, fuller excerpt
 crossmem load . --provider codex --out .crossmem/context.md
 crossmem update .                              # write durable .crossmem/ files (idempotent)
-crossmem export                                # copy all stores + instructions into one portable dump
-crossmem import --dry-run                      # preview a restore back into this machine
-crossmem sync --remote hetzbox:companydata/convdump   # push the dump with rclone
+crossmem export .                              # write .crossmem/qa.jsonl for this folder
+crossmem export --out ~/conversations          # whole-machine qa.jsonl
+crossmem import . --in ~/conversations         # import qa.jsonl into this folder
+crossmem sync --remote hetzbox:companydata/convdump   # push a store dump with rclone
 ```
 
 `crossmem update` is idempotent: the files it writes carry no generated-at timestamp and are left untouched when their content has not changed, so re-running produces no diff and no mtime churn.
@@ -107,58 +108,32 @@ crossmem help load
 crossmem help list
 ```
 
-## Portable Dump: export / import / sync
+## Export / import (qa.jsonl)
 
-`crossmem export` turns every discoverable store plus the well-known global
-instruction and memory files into a single portable dump directory, the one
-format that `import` restores and `sync` pushes:
+`crossmem export` writes one `qa.jsonl` of every question, the full answer, and
+the tools/results/thinking in between — **no agent name, no model name, no
+tokens**. `import` reads that same file back. That is the only export/import
+format.
 
-```text
-~/.assets/convdump/
-  manifest.json                  # schema, host, per-store source/destination, counts
-  stores/<provider>/<kind>/…     # session transcripts + Claude project memory, mirrored
-  instructions/…                 # Claude Code CLAUDE.md, Codex AGENTS.md, ~/.agents/AGENTS.md
-  memory/…                       # tool memory outside the session stores (Codex goals.sqlite)
+Each line:
+
+```json
+{"sessionId":"...","folder":"/path","q":"...","a":"...","time":"...","messages":[{"role":"user","content":"..."},{"role":"assistant","content":"..."},{"role":"tool","name":"Write","content":"..."}]}
 ```
 
-- **export** copies files, never credentials: auth/credential files, `*.env`,
-  key/pem/p8 material, sqlite WAL/SHM transients, and `vault/`, `cache/`,
-  `node_modules/` directories never leave the machine. Symlinks are not
-  followed.
-- **import** restores the dump into *this* machine's store locations
-  (honouring `stores`/`extraStores` overrides), so a dump made on one machine
-  restores correctly on another. Files whose bytes already match are skipped,
-  making re-imports idempotent. Use `--dry-run` first, `--force` to overwrite
-  identical files.
-- **sync** shells out to the `rclone` binary on PATH and does an additive
-  `rclone copy` of the dump dir to the remote (`--prune` switches to `rclone
-  sync`; `--pull` pulls back). No archive step: what is synced is exactly what
-  `import` reads.
-
 ```sh
-crossmem export --out ~/.assets/convdump
-crossmem import --in ~/.assets/convdump --dry-run
-crossmem import --in ~/.assets/convdump
-crossmem sync --remote hetzbox:companydata/convdump
-crossmem sync --pull --remote hetzbox:companydata/convdump
-```
-
-Conversation export (`--qa`) writes one `qa.jsonl` of every question, the full
-answer, and the tools/results/thinking in between — **no agent name, no model
-name, no tokens**. Each line is `sessionId`, `folder`, `q`, `a`, `time`,
-`messages`. The store dump above is unchanged so `import`/`sync` still
-round-trip original transcripts.
-
-```sh
-crossmem export --qa --out ~/conversations
-crossmem export --qa .
-crossmem export --qa --dump --out ~/.assets/convdump
+crossmem export .                              # this folder → .crossmem/qa.jsonl
+crossmem export --out ~/conversations          # whole machine
+crossmem import . --in ~/conversations         # copy qa.jsonl into this folder
+crossmem import . --in ~/conversations --merge --dry-run
 ```
 
 ```text
-~/conversations/
-  qa.jsonl     # {"sessionId","folder","q","a","time","messages":[{role,name,content}]}
+.crossmem/qa.jsonl
 ```
+
+`sync` is separate: it rclone-copies a **store dump** (original transcripts) for
+moving machines. It does not go through `export`/`import`.
 
 Set a standing remote and dump dir in the config instead of typing them every
 time:

@@ -30,8 +30,8 @@ Commands:
   context [options] [folder]              alias for load
   update [options] [folder]               write .crossmem/context.md and source manifests
   guardrails [folder]                     print active repo instruction file references
-  export [options]                        copy stores into a dump, or export plain Q&A JSONL
-  import [options]                        restore a dump back into this machine's stores
+  export [options] [folder]               write qa.jsonl of every session (no agent/model names)
+  import [options] [folder]               import a qa.jsonl into a folder's .crossmem/
   sync [options]                          push (or pull) the dump dir with rclone
   config [options]                        show where each store is looked for, and override it
   install --skills [options]              install the global crossmem-loader skill
@@ -45,9 +45,10 @@ Examples:
   crossmem load . --provider codex --limit 5
   crossmem load /path/to/repo --out /tmp/context.md
   crossmem update .
-  crossmem export --out ~/.assets/convdump
-  crossmem export --qa --out ~/conversations
-  crossmem import --in ~/.assets/convdump --dry-run
+  crossmem export --out ~/conversations
+  crossmem export .
+  crossmem import --in ~/conversations
+  crossmem import . --in ~/conversations
   crossmem sync --remote hetzbox:companydata/convdump
   crossmem help load
 `
@@ -154,62 +155,55 @@ Examples:
 
 const exportHelpText = `Usage: crossmem export [options] [folder]
 
-Two jobs, one command:
+Write one qa.jsonl of every question, the full answer, and everything that
+happened in between (tools, results, thinking). No agent name, no model name,
+no tokens. Each line is sessionId, folder, q, a, time, messages.
 
-  Store dump (default, no --qa): copy every discoverable store (Claude, Codex,
-  Copilot, Devin, OpenCode sessions) plus the well-known global instruction and
-  memory files into a portable dump directory with a manifest.json. That dump
-  is the one format ` + "`import`" + ` reads back and ` + "`sync`" + ` pushes to a
-  remote. Credential files, auth databases, env files, and
-  vault/cache/node_modules directories are never exported.
+Pass a folder to keep only sessions whose working directory is that folder
+(writes <folder>/.crossmem/qa.jsonl). Omit it to export the whole machine.
 
-  Conversation export (--qa): write one qa.jsonl of every question, the full
-  answer, and everything that happened in between (tools, results, thinking).
-  No agent name, no model name, no tokens. Each line is sessionId, folder,
-  q, a, time, messages. Pass a folder to keep only sessions whose working
-  directory is that folder; omit it to export the whole machine.
+This is the only export format. ` + "`import`" + ` reads the same qa.jsonl back.
 
 Options:
-  --out <dir>                             output directory (default: dumpDir from config, else ~/.assets/convdump)
+  --out <dir>                             output directory (default: <folder>/.crossmem, else dumpDir / ~/.assets/convdump)
   --provider <name>                       claude, codex, copilot, copilot-cli, devin, opencode, or all (default: all)
-  --qa                                    write qa.jsonl (sessionId, folder, q, a, time, messages)
-  --dump                                  also copy the original stores (implied when --qa is omitted)
-  --limit <number>                        max sessions for --qa (default: all)
+  --limit <number>                        max sessions (default: all)
   --json                                  print the result as JSON
   -h, --help                              display help for command
 
 Examples:
   crossmem export
-  crossmem export --out ~/.assets/convdump
-  crossmem export --qa --out ~/conversations
-  crossmem export --qa .
-  crossmem export --qa --dump --out ~/.assets/convdump
+  crossmem export .
+  crossmem export --out ~/conversations
   crossmem export --provider claude --json
 `
 
-const importHelpText = `Usage: crossmem import [options]
+const importHelpText = `Usage: crossmem import [options] [folder]
 
-Restore a dump directory back into this machine's stores. Each store resolves
-to the local location (honouring the user config), so a dump made on another
-machine restores into the right place here. Files whose bytes already match are
-skipped, making re-imports idempotent.
+Import a qa.jsonl written by ` + "`export`" + `. Pass a folder to write
+<folder>/.crossmem/qa.jsonl; omit it to use dumpDir / ~/.assets/convdump.
+
+--in may be the qa.jsonl file itself or a directory that contains one.
 
 Options:
-  --in <dir>                              dump directory to restore (default: dumpDir from config, else ~/.assets/convdump)
-  --dry-run                               report what would be restored without writing anything
-  --force                                 overwrite local files even when identical
+  --in <path>                             qa.jsonl file or directory (default: dumpDir / ~/.assets/convdump)
+  --out <dir>                             destination directory (default: <folder>/.crossmem, else dumpDir)
+  --merge                                 append pairs that are not already in the destination
+  --dry-run                               report what would be written without writing
+  --json                                  print the result as JSON
   -h, --help                              display help for command
 
 Examples:
-  crossmem import --in ~/.assets/convdump --dry-run
-  crossmem import --in ~/.assets/convdump
+  crossmem import --in ~/conversations
+  crossmem import . --in ~/conversations
+  crossmem import . --in ~/conversations/qa.jsonl --merge --dry-run
 `
 
 const syncHelpText = `Usage: crossmem sync [options]
 
-Push the local dump directory to an rclone remote (or pull it back with
---pull) using the rclone binary on PATH. The dump is a directory, so what is
-synced is exactly what ` + "`import`" + ` reads — no archive step.
+Push a local store dump directory to an rclone remote (or pull it back with
+--pull) using the rclone binary on PATH. This mirrors original session stores
+between machines. Conversation corpora use ` + "`export`" + ` / ` + "`import`" + ` (qa.jsonl), not sync.
 
 Options:
   --remote <name:path>                    rclone destination/source, e.g. hetzbox:companydata/convdump
@@ -470,84 +464,31 @@ func runExport(args []string, stdout io.Writer) error {
 	args, positional := extractPositionalFolder(args)
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	out := fs.String("out", "", "dump directory")
+	out := fs.String("out", "", "output directory")
 	provider := fs.String("provider", "all", "provider")
 	jsonOut := fs.Bool("json", false, "print the result as JSON")
-	qa := fs.Bool("qa", false, "write plain Q&A jsonl with no agent or model names")
-	dump := fs.Bool("dump", false, "copy original stores")
-	limit := fs.Int("limit", 0, "max sessions for qa")
+	limit := fs.Int("limit", 0, "max sessions")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if positional == "" && fs.NArg() > 0 {
 		positional = fs.Arg(0)
 	}
-	wantQA := *qa
-	wantDump := *dump || !wantQA
-
-	label := "Exporting stores…"
-	switch {
-	case wantQA && wantDump:
-		label = "Exporting…"
-	case wantQA:
-		label = "Exporting conversations…"
-	}
-	sp := startSpinner(os.Stderr, label)
-
-	var manifest providers.DumpManifest
-	var conv providers.ConvExportResult
-	var err error
-	if wantDump {
-		manifest, err = providers.ExportDump(providers.ExportOptions{Out: *out, Provider: *provider})
-		if err != nil {
-			sp.Stop()
-			return err
-		}
-	}
-	if wantQA {
-		convOut := *out
-		if convOut == "" && wantDump {
-			convOut = manifest.Out
-		}
-		conv, err = providers.ExportConversations(providers.ConvExportOptions{
-			Out:      convOut,
-			Provider: *provider,
-			CWD:      positional,
-			Limit:    *limit,
-		})
-		if err != nil {
-			sp.Stop()
-			return err
-		}
-	}
+	sp := startSpinner(os.Stderr, "Exporting conversations…")
+	conv, err := providers.ExportConversations(providers.ConvExportOptions{
+		Out:      *out,
+		Provider: *provider,
+		CWD:      positional,
+		Limit:    *limit,
+	})
 	sp.Stop()
-
+	if err != nil {
+		return err
+	}
 	if *jsonOut {
-		if wantDump && wantQA {
-			return writeJSON(stdout, map[string]any{"dump": manifest, "conversations": conv})
-		}
-		if wantQA {
-			return writeJSON(stdout, conv)
-		}
-		return writeJSON(stdout, manifest)
+		return writeJSON(stdout, conv)
 	}
-
-	if wantQA {
-		fmt.Fprintf(stdout, "Exported %d sessions, %d Q&A pairs to %s\n", conv.Sessions, conv.QAPairs, conv.QAFile)
-	}
-	if wantDump {
-		totalFiles, totalBytes := 0, int64(0)
-		for _, store := range manifest.Stores {
-			totalFiles += store.Files
-			totalBytes += store.Bytes
-		}
-		fmt.Fprintf(stdout, "Exported %d stores (%d files, %s) to %s\n",
-			len(manifest.Stores), totalFiles, humanBytes(totalBytes), manifest.Out)
-		for _, store := range manifest.Stores {
-			fmt.Fprintf(stdout, "  %-10s %-24s %6d files %10s\n", store.Provider, store.Kind, store.Files, humanBytes(store.Bytes))
-		}
-		fmt.Fprintf(stdout, "  instructions: %d, memory: %d\n", len(manifest.Instructions), len(manifest.Memory))
-	}
+	fmt.Fprintf(stdout, "Exported %d sessions, %d Q&A pairs to %s\n", conv.Sessions, conv.QAPairs, conv.QAFile)
 	return nil
 }
 
@@ -556,32 +497,41 @@ func runImport(args []string, stdout io.Writer) error {
 		_, _ = fmt.Fprint(stdout, importHelpText)
 		return nil
 	}
+	args, positional := extractPositionalFolder(args)
 	fs := flag.NewFlagSet("import", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	in := fs.String("in", "", "dump directory")
-	dryRun := fs.Bool("dry-run", false, "report what would be restored without writing")
-	force := fs.Bool("force", false, "overwrite local files even when identical")
+	in := fs.String("in", "", "qa.jsonl file or directory")
+	out := fs.String("out", "", "destination directory")
+	merge := fs.Bool("merge", false, "append pairs not already in the destination")
+	dryRun := fs.Bool("dry-run", false, "report what would be written without writing")
+	jsonOut := fs.Bool("json", false, "print the result as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	verb := "Restored"
-	if *dryRun {
-		verb = "Would restore"
+	if positional == "" && fs.NArg() > 0 {
+		positional = fs.Arg(0)
 	}
-	res, err := providers.ImportDump(providers.ImportOptions{In: *in, DryRun: *dryRun, Force: *force})
+	res, err := providers.ImportConversations(providers.ConvImportOptions{
+		In:     *in,
+		Out:    *out,
+		CWD:    positional,
+		DryRun: *dryRun,
+		Merge:  *merge,
+	})
 	if err != nil {
 		return err
 	}
-	for _, path := range res.Restored {
-		fmt.Fprintf(stdout, "%s %s\n", verb, path)
+	if *jsonOut {
+		return writeJSON(stdout, res)
 	}
-	for _, path := range res.Skipped {
-		fmt.Fprintf(stdout, "Skipped (identical) %s\n", path)
+	verb := "Imported"
+	if *dryRun {
+		verb = "Would import"
 	}
-	for _, path := range res.Missing {
-		fmt.Fprintf(stdout, "Missing target %s\n", path)
+	fmt.Fprintf(stdout, "%s %d Q&A pairs to %s\n", verb, res.Added, res.QAFile)
+	if *merge {
+		fmt.Fprintf(stdout, "  source: %d pairs in %s\n", res.QAPairs, res.Source)
 	}
-	fmt.Fprintf(stdout, "%s %d files, skipped %d, missing %d\n", verb, len(res.Restored), len(res.Skipped), len(res.Missing))
 	return nil
 }
 
@@ -933,7 +883,7 @@ func flagTakesValue(arg string) bool {
 		return false
 	}
 	switch name {
-	case "json", "full", "include-current", "no-questions", "qa", "dump",
+	case "json", "full", "include-current", "no-questions", "merge",
 		"dry-run", "force", "prune", "pull", "skills", "agents", "help", "h",
 		"version", "V", "init":
 		return false

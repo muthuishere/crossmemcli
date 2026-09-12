@@ -14,7 +14,7 @@ Layout:
 
 - `SKILL.md` — routing table, the load hot path, guardrails vs. history, safety.
 - `references/persisting.md` — `crossmem update` and the committable `.crossmem/`.
-- `references/portability.md` — `export` / `sync` / `import` between machines, plus `export --qa` for a training/RAG jsonl.
+- `references/portability.md` — `export` / `import` of `qa.jsonl` (training, RAG, moving conversations).
 - `references/troubleshooting.md` — `scan`, `config`, env overrides, debug logging.
 
 The CLI stays the deterministic local context source; the skill decides which
