@@ -1,0 +1,27 @@
+{
+  "name": "crossmemcli",
+  "modules": [
+    {
+      "path": "npm"
+    },
+    {
+      "path": "npm/platforms/darwin-arm64"
+    },
+    {
+      "path": "npm/platforms/darwin-x64"
+    },
+    {
+      "path": "npm/platforms/linux-arm64"
+    },
+    {
+      "path": "npm/platforms/linux-x64"
+    },
+    {
+      "path": "npm/platforms/windows-x64"
+    },
+    {
+      "path": "scripts/devin-gui-decrypt"
+    }
+  ],
+  "wiki": false
+}

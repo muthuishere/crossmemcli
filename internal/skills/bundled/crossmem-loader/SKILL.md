@@ -26,22 +26,55 @@ When the user asks to load context / resume / pick up where they left off:
    crossmem list . --limit 5
    ```
 
-   This searches all tools (Claude, Codex, Copilot, Copilot CLI, Devin CLI, Devin desktop, OpenCode), newest first. Each row's
-   last column is a handle: a transcript path, or `devin:<id>`. If nothing matches,
-   name the folder: `crossmem list /path/to/repo --limit 5`.
+   Searches every tool (Claude, Codex, Copilot, Copilot CLI, Devin CLI, Devin
+   desktop, OpenCode), newest first. Each row carries what you need to choose:
 
-2. **Pick the session to resume — skip the live one.** The newest row is almost
-   always THE SESSION YOU ARE IN RIGHT NOW (same tool, timestamp ≈ now, its content
-   is this very conversation). That is not what to resume — skip it. Resume the most
-   recent *prior* session (often the previous tool). If unsure which is live, show
-   the list and ask.
+   ```
+   2026-08-29T12:07  claude   279691  /Users/…/5a982600-….jsonl
+     workspace: /Users/…/apl
+     title:     In-memory work with claude.md and ctx-optimize
+     first:     do it in memory for this folder claude.md use ctx-optimize for…
+     last:      now wire the oauth consent screen and verify the callback
+   ```
 
-3. **Load the full session** — always pass `--full` so the brief is built from the
-   complete session, not a truncated slice (this is what produces a good summary):
+   The last column is the handle: a transcript path, or `devin:<id>`. If nothing
+   matches, name the folder: `crossmem list /path/to/repo --limit 5`.
+
+   **The session you are in right now is already excluded** — crossmem detects it
+   from the agent's own session id, automatically for Claude Code, the Devin CLI,
+   and Codex. (`--include-current` brings it back if you ever need it.)
+
+   Copilot and OpenCode export no session id, so if you are running inside one of
+   those, the newest row may still be this conversation — its `first`/`last` will
+   read as the request you are handling right now. Skip it, and export
+   `CROSSMEM_CURRENT_SESSION=<id>` to have crossmem filter it for you.
+
+2. **Choose by content, not by recency.** `title` is what the session was called;
+   `first` and `last` are the opening and closing question, and they are what tell
+   two sessions in one folder apart. Rank them:
+
+   - **`last` describes unfinished work** that matches what the user now wants —
+     strongest signal, pick it. This is usually where they stopped.
+   - **`first` states the goal** the user is now referring to — next strongest.
+   - **Same workspace** as the folder in play — required, already filtered for.
+   - **Recency** — a tiebreak between otherwise equal candidates, never the reason
+     on its own.
+
+   **If two or more sessions are plausibly the right one, ask.** Show them as a
+   short numbered list with title / first / last, and let the user pick — guessing
+   wrong costs them a whole reconstructed context. Ask only when genuinely torn;
+   one clear winner means just load it.
+
+3. **Load the chosen session in full:**
 
    ```sh
    crossmem load --session <handle> --full
    ```
+
+   Always `--full` here: the brief must be built from the complete session, not a
+   truncated slice. (A user who always wants full can set it as a standing default
+   with `crossmem config --init` and `"defaults": { "mode": "full" }` — but pass
+   `--full` explicitly anyway, so the skill does not depend on their config.)
 
 4. **Write the brief — this is where you filter noise.** The raw transcript contains
    boilerplate you must IGNORE:

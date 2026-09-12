@@ -32,9 +32,14 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 		}
 	}
 
+	// The SQLite providers limit in the query, but sessions are dropped after
+	// that — the caller's own live session, and anything outside the folder. Ask
+	// for enough extra rows that filtering cannot starve the requested page.
+	queryLimit := opts.Limit + len(currentSessionIDs())
+
 	var sessions []Session
 	if opts.Provider == "all" || opts.Provider == "devin" {
-		devin, err := listDevin(opts.Limit, opts.CWD)
+		devin, err := listDevin(queryLimit, opts.CWD)
 		if err == nil {
 			sessions = append(sessions, devin...)
 		} else {
@@ -42,7 +47,7 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 		}
 	}
 	if opts.Provider == "all" || opts.Provider == "opencode" {
-		opencode, err := listOpenCode(opts.Limit, opts.CWD)
+		opencode, err := listOpenCode(queryLimit, opts.CWD)
 		if err == nil {
 			sessions = append(sessions, opencode...)
 		} else {
@@ -50,7 +55,7 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 		}
 	}
 	if opts.Provider == "all" || opts.Provider == "copilot-cli" {
-		copilotCLI, err := listCopilotCLI(opts.Limit, opts.CWD)
+		copilotCLI, err := listCopilotCLI(queryLimit, opts.CWD)
 		if err == nil {
 			sessions = append(sessions, copilotCLI...)
 		} else {
@@ -70,11 +75,20 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 		sessions = append(sessions, jsonl...)
 	}
 
+	// Newest first, with the ref as a tiebreaker so equal timestamps cannot
+	// reorder between runs — callers write these results to disk.
 	sort.Slice(sessions, func(i, j int) bool {
+		if sessions[i].Modified.Equal(sessions[j].Modified) {
+			return sessions[i].Ref < sessions[j].Ref
+		}
 		return sessions[i].Modified.After(sessions[j].Modified)
 	})
+	sessions = markCurrent(sessions, opts.IncludeCurrent)
 	if len(sessions) > opts.Limit {
 		sessions = sessions[:opts.Limit]
+	}
+	if opts.Questions {
+		sessions = withQuestions(sessions)
 	}
 	return sessions, nil
 }
@@ -138,8 +152,12 @@ func listJSONL(root string, provider string) ([]Session, error) {
 			if workspace == "" {
 				workspace = inferWorkspace(e.path, inferred)
 			}
+			base := filepath.Base(e.path)
 			sessions[i] = Session{
-				Provider:  inferred,
+				Provider: inferred,
+				// JSONL stores name the transcript <session-id>.jsonl, which is
+				// the id the owning agent exports for its live session.
+				ID:        strings.TrimSuffix(base, filepath.Ext(base)),
 				Ref:       e.path,
 				Path:      e.path,
 				Bytes:     e.info.Size(),
@@ -204,9 +222,10 @@ func readJSONLMeta(path string, provider string) (title string, cwd string) {
 	return title, cwd
 }
 
-// devinDB is the Devin CLI session database on this machine: the XDG data dir
-// on Linux/macOS, roaming AppData\Cognition on Windows, or wherever the user
-// config repoints it. Empty when Devin is not installed here.
+// devinDB is the one Devin session database on this machine: XDG
+// ~/.local/share/devin/cli on Linux/macOS, %APPDATA%\devin\cli on Windows, or
+// wherever $DEVIN_DB_PATH / $DEVIN_HOME / the user config point it. Empty when
+// Devin is not installed here.
 func devinDB() string {
 	return storePath("devin", "sqlite-sessions")
 }

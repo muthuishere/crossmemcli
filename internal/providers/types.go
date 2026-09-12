@@ -24,6 +24,15 @@ type Session struct {
 	Modified  time.Time `json:"modified"`
 	Workspace string    `json:"workspace,omitempty"`
 	Title     string    `json:"title,omitempty"`
+	// FirstQuestion and LastQuestion are the session's opening and closing user
+	// messages. A title alone rarely says what a session became; the first and
+	// last thing asked is what lets a caller tell two sessions apart and pick
+	// the right one to resume.
+	FirstQuestion string `json:"firstQuestion,omitempty"`
+	LastQuestion  string `json:"lastQuestion,omitempty"`
+	// Current marks the session this process is running inside, which must
+	// never be offered as context to resume from.
+	Current bool `json:"current,omitempty"`
 }
 
 type ListOptions struct {
@@ -31,4 +40,14 @@ type ListOptions struct {
 	CWD      string
 	Limit    int
 	Full     bool
+	// IncludeCurrent keeps the session this process runs inside in the results.
+	// Off by default: resuming your own live session returns your own context.
+	IncludeCurrent bool
+	// Questions populates FirstQuestion/LastQuestion. It costs one extra tail
+	// read (or two indexed queries) per session, so listing asks for it and
+	// bundle building does not.
+	Questions bool
+	// Deterministic drops generated-at timestamps so repeated runs produce
+	// byte-identical output. Set by `update`, which writes files to disk.
+	Deterministic bool
 }

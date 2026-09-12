@@ -54,22 +54,21 @@ func vscodeUserRoots(app string) []string {
 	}
 }
 
-// devinCLIRoots is the Devin CLI's store directory. Linux/macOS use the XDG
-// data dir; the Windows build ships under the Cognition vendor folder in
-// roaming AppData.
+// devinCLIRoots is the Devin CLI data directory. Devin keeps every session in
+// one SQLite database at <data>/sessions.db, and both the CLI and the desktop
+// app write to it (the desktop drives the CLI through an ACP connector, so
+// there is no separate desktop chat store). $DEVIN_HOME relocates the whole
+// data directory; the new Windows default is %APPDATA%\devin\cli (the older
+// %APPDATA%\Cognition\cli install path is retired).
 var devinCLIRoots = append(
-	appDataRoots("devin/cli"),
-	"%APPDATA%/Cognition/cli",
-	"%LOCALAPPDATA%/Cognition/cli",
-	"~/AppData/Roaming/Cognition/cli",
-	"~/AppData/Local/Cognition/cli",
-	"~/.local/share/Cognition/cli",
+	[]string{"$DEVIN_HOME/cli"},
+	appDataRoots("devin/cli")...,
 )
 
-// The Devin desktop app is a VS Code fork (product.json: nameLong "Devin",
-// dataFolderName ".devin", formerly Windsurf), so its chat transcripts sit in
-// the standard workspaceStorage layout under a "Devin" data folder.
-var devinDesktopRoots = append(vscodeUserRoots("Devin"), vscodeUserRoots("Windsurf")...)
+// devinSessionDBCandidates is every location the one Devin sessions.db lives:
+// the $DEVIN_DB_PATH env override first (a direct path to the file), then
+// $DEVIN_HOME/cli/sessions.db and the standard data dirs.
+var devinSessionDBCandidates = append([]string{"$DEVIN_DB_PATH"}, under(devinCLIRoots, "sessions.db")...)
 
 var vscodeCopilotRoots = append(vscodeUserRoots("Code"), vscodeUserRoots("Code - Insiders")...)
 
@@ -83,10 +82,8 @@ var storeDefinitions = []storeDefinition{
 	{"copilot", "vscode-workspace-storage", under(vscodeCopilotRoots, "workspaceStorage"), true, "VS Code chatSessions and GitHub.copilot-chat transcript JSONL files (stable and Insiders)."},
 	{"copilot", "zed-copilot", under(appDataRoots("Zed"), "copilot"), false, "Zed Copilot language-server cache; not a chat transcript store by itself."},
 	{"copilot-cli", "sqlite-sessions", []string{"~/.copilot/session-store.db"}, true, "GitHub Copilot CLI SQLite session store. Home-relative on every OS."},
-	{"devin", "sqlite-sessions", under(devinCLIRoots, "sessions.db"), true, "Devin CLI SQLite session DB."},
+	{"devin", "sqlite-sessions", devinSessionDBCandidates, true, "Devin session database. One sessions.db holds every session, whether driven from the CLI or the desktop app's ACP connector. $DEVIN_DB_PATH / $DEVIN_HOME win when set; the Windows default is %APPDATA%\\devin\\cli."},
 	{"devin", "cli-logs", under(devinCLIRoots, "logs"), false, "Devin CLI logs. Session content primarily lives in sessions.db."},
-	{"devin-gui", "vscode-workspace-storage", under(devinDesktopRoots, "workspaceStorage"), true, "Devin desktop app (VS Code fork, formerly Windsurf) chat session JSONL files."},
-	{"devin-gui", "desktop-data", []string{"~/.devin", "~/.windsurf"}, false, "Devin desktop home data folder. Cascade conversation blobs live here in a private binary format; crossmem reports it but does not extract from it."},
 	{"opencode", "sqlite-sessions", under(appDataRoots("opencode"), "opencode*.db"), true, "OpenCode SQLite session DB (also opencode-dev.db / opencode-local.db)."},
 }
 
@@ -280,8 +277,6 @@ func inferProvider(path string, fallback string) string {
 		return "claude"
 	case strings.Contains(slashed, "/.codex/"):
 		return "codex"
-	case strings.Contains(slashed, "/Devin/User/"), strings.Contains(slashed, "/Windsurf/User/"):
-		return "devin-gui"
 	case strings.Contains(slashed, "/workspaceStorage/"):
 		return "copilot"
 	default:
@@ -293,7 +288,7 @@ func inferProvider(path string, fallback string) string {
 // journal format, which decides both how a transcript is parsed and how its
 // workspace folder is resolved.
 func isVSCodeChat(provider string) bool {
-	return provider == "copilot" || provider == "devin-gui"
+	return provider == "copilot"
 }
 
 // normalizeCase folds a path's case on Windows, whose filesystem is

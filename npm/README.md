@@ -85,10 +85,10 @@ Every command has built-in help: `crossmem help load`, `crossmem --version`.
 | Copilot (VS Code) | `~/Library/Application Support/Code/User/workspaceStorage/<id>/.../*.jsonl` (macOS), `~/.config/Code/User/...` (Linux) | `%APPDATA%\Code\User\workspaceStorage\<id>\...` |
 | Copilot CLI | `~/.copilot/session-store.db` (SQLite) | same |
 | Devin CLI | `~/.local/share/devin/cli/sessions.db` (SQLite) | `%APPDATA%\Cognition\cli\sessions.db` |
-| Devin desktop | `~/Library/Application Support/Devin/User/workspaceStorage/<id>/.../*.jsonl` (macOS), `~/.config/Devin/User/...` (Linux) | `%APPDATA%\Devin\User\workspaceStorage\<id>\...` |
+| Devin desktop | `~/.codeium/windsurf/cascade/*.pb` — encrypted, discovery only | same |
 | OpenCode | `~/.local/share/opencode/opencode*.db` (SQLite) | `%APPDATA%\opencode\opencode*.db` |
 
-The Devin desktop app is a VS Code fork (formerly Windsurf), so its chat is read the same way as VS Code's. `$CLAUDE_CONFIG_DIR` / `$CODEX_HOME` are honored when set, and `%LOCALAPPDATA%`, `$XDG_DATA_HOME`, VS Code Insiders, and the old Windsurf folders are checked too.
+The Devin desktop app stores its own Cascade conversations encrypted, so they cannot be read; desktop work driven through its `devin-cli` connector lands in the Devin CLI store and *is* readable. `$CLAUDE_CONFIG_DIR` / `$CODEX_HOME` are honored when set, and `%LOCALAPPDATA%`, `$XDG_DATA_HOME`, VS Code Insiders, and the old Windsurf folders are checked too.
 
 Run `crossmem config` to see which of these were found on your machine. If a tool keeps its sessions elsewhere, repoint it in `~/.config/crossmemcli/config.json`:
 

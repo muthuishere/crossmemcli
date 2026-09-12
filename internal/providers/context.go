@@ -125,7 +125,12 @@ func computePreviews(sessions []Session, maxChars int) []string {
 func renderBundle(sessions []Session, bodies []string, opts ListOptions) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# CrossMem Context Bundle\n\n")
-	fmt.Fprintf(&b, "Generated: %s\n", time.Now().UTC().Format(time.RFC3339))
+	// A generated-at stamp makes every run differ, which would make the files
+	// `update` writes churn on each invocation. Callers that persist the bundle
+	// ask for the deterministic form; the file's mtime records when it was made.
+	if !opts.Deterministic {
+		fmt.Fprintf(&b, "Generated: %s\n", time.Now().UTC().Format(time.RFC3339))
+	}
 	fmt.Fprintf(&b, "Searched: %s\n", searchedProviders(opts.Provider))
 	if opts.CWD != "" {
 		fmt.Fprintf(&b, "Folder: %s\n", expandHome(opts.CWD))
@@ -217,13 +222,16 @@ func extractJSONLText(raw []byte, provider string) string {
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return ""
 	}
+	return extractObject(obj, provider)
+}
+
+func extractObject(obj map[string]any, provider string) string {
 	switch {
 	case provider == "codex":
 		return extractCodex(obj)
 	case provider == "claude":
 		return extractClaude(obj)
-	// The Devin desktop app is a VS Code fork, so its chat journal parses with
-	// the same reader as Copilot in VS Code.
+	// Copilot in VS Code stores chat in the VS Code chat journal format.
 	case isVSCodeChat(provider):
 		return extractCopilot(obj)
 	default:

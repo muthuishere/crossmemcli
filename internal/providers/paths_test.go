@@ -17,10 +17,10 @@ func TestExpandPathDropsUnsetEnvCandidates(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"windows form", "%CROSSMEM_TEST_ROOT%/Cognition/cli/sessions.db", "/data/roaming/Cognition/cli/sessions.db"},
-		{"shell form", "$CROSSMEM_TEST_ROOT/Cognition", "/data/roaming/Cognition"},
-		{"braced form", "${CROSSMEM_TEST_ROOT}/Cognition", "/data/roaming/Cognition"},
-		{"unset windows var", "%CROSSMEM_TEST_MISSING%/Cognition/cli/sessions.db", ""},
+		{"windows form", "%CROSSMEM_TEST_ROOT%/devin/cli/sessions.db", "/data/roaming/devin/cli/sessions.db"},
+		{"shell form", "$CROSSMEM_TEST_ROOT/devin", "/data/roaming/devin"},
+		{"braced form", "${CROSSMEM_TEST_ROOT}/devin", "/data/roaming/devin"},
+		{"unset windows var", "%CROSSMEM_TEST_MISSING%/devin/cli/sessions.db", ""},
 		{"unset shell var", "$CROSSMEM_TEST_MISSING/opencode", ""},
 		{"plain path", "/tmp/x", "/tmp/x"},
 	}
@@ -41,12 +41,13 @@ func TestExpandPathResolvesHome(t *testing.T) {
 }
 
 // Every Devin candidate must be a real per-platform location, and the Windows
-// one the CLI actually ships to must be present.
+// one the CLI ships to (the path changed from %APPDATA%\devin\cli) must be
+// present.
 func TestDevinCandidatesCoverWindows(t *testing.T) {
 	candidates := storeCandidates("devin", "sqlite-sessions")
 	wantAny := []string{
 		"~/.local/share/devin/cli/sessions.db",
-		"%APPDATA%/Cognition/cli/sessions.db",
+		"%APPDATA%/devin/cli/sessions.db",
 	}
 	for _, want := range wantAny {
 		found := false
@@ -59,6 +60,33 @@ func TestDevinCandidatesCoverWindows(t *testing.T) {
 		if !found {
 			t.Fatalf("devin candidates %v missing %q", candidates, want)
 		}
+	}
+}
+
+// $DEVIN_HOME relocates the whole Devin data directory and $DEVIN_DB_PATH
+// points straight at the sessions.db file; both must win over the defaults.
+func TestDevinDBHonorsEnvOverrides(t *testing.T) {
+	home := t.TempDir()
+	dbPath := filepath.Join(t.TempDir(), "custom.db")
+	if err := os.MkdirAll(filepath.Join(home, "cli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(home, "cli", "sessions.db"), dbPath} {
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resetConfigForTest(t)
+
+	t.Setenv("DEVIN_HOME", home)
+	if got := devinDB(); got != filepath.Join(home, "cli", "sessions.db") {
+		t.Fatalf("DEVIN_HOME not honored: devinDB() = %q, want %q", got, filepath.Join(home, "cli", "sessions.db"))
+	}
+	// A direct DB path wins over the home-derived default; DEVIN_DB_PATH is
+	// listed before the DEVIN_HOME-derived candidates.
+	t.Setenv("DEVIN_DB_PATH", dbPath)
+	if got := devinDB(); got != dbPath {
+		t.Fatalf("DEVIN_DB_PATH not honored: devinDB() = %q, want %q", got, dbPath)
 	}
 }
 
@@ -116,41 +144,28 @@ func TestReadCopilotFolderWindowsURI(t *testing.T) {
 	}
 }
 
-// The Devin desktop app is a VS Code fork (product.json: nameLong "Devin",
-// formerly Windsurf), so a transcript under its data folder must be labelled
-// devin-gui, parsed with the VS Code chat reader, and resolve its folder from
-// workspaceStorage/<id>/workspace.json like any other fork.
-func TestDevinDesktopIsReadAsAVSCodeFork(t *testing.T) {
-	transcript := "/Users/m/Library/Application Support/Devin/User/workspaceStorage/abc123/chatSessions/s.jsonl"
-
-	if got := inferProvider(transcript, ""); got != "devin-gui" {
-		t.Fatalf("inferProvider = %q, want devin-gui", got)
+// The Devin desktop app is not a separate chat store: it drives the Devin CLI
+// through an ACP connector, so every desktop session lands in the same
+// sessions.db and is read by the single `devin` provider. There is no
+// `devin-gui` provider, and the retired Windsurf/Cascade stores are gone.
+func TestDevinIsTheOnlySessionSource(t *testing.T) {
+	for _, name := range Providers() {
+		if name == "devin-gui" {
+			t.Fatal("devin-gui must no longer be a provider")
+		}
 	}
-	// Copilot in VS Code must still win for the VS Code data folder.
-	if got := inferProvider("/Users/m/Library/Application Support/Code/User/workspaceStorage/x/chatSessions/s.jsonl", ""); got != "copilot" {
-		t.Fatalf("inferProvider for VS Code = %q, want copilot", got)
+	if _, ok := storeDefinitionFor("devin-gui", "vscode-workspace-storage"); ok {
+		t.Fatal("the retired devin-gui workspaceStorage store must be gone")
 	}
-
-	line := `{"kind":0,"v":{"requests":[{"message":{"text":"hello"},"responseMarkdownInfo":{"markdown":"hi there"}}]}}`
-	if got := extractJSONLText([]byte(line), "devin-gui"); !strings.Contains(got, "user: hello") {
-		t.Fatalf("devin-gui transcript should parse as VS Code chat, got %q", got)
+	if _, ok := storeDefinitionFor("devin-gui", "cascade-conversations"); ok {
+		t.Fatal("the retired cascade store must be gone")
 	}
-
-	// Only chat transcripts, not the rest of the workspaceStorage tree.
-	if isCopilotSessionPath("/x/workspaceStorage/abc/state/other.jsonl") {
-		t.Fatal("non-chat workspaceStorage files must be skipped")
+	db, ok := storeDefinitionFor("devin", "sqlite-sessions")
+	if !ok || !db.Primary {
+		t.Fatal("devin:sqlite-sessions must be the provider's primary store")
 	}
-
-	dir := t.TempDir()
-	wsDir := filepath.Join(dir, "workspaceStorage", "abc123")
-	if err := os.MkdirAll(filepath.Join(wsDir, "chatSessions"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(wsDir, "workspace.json"), []byte(`{"folder":"file:///Users/m/repo"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := inferWorkspace(filepath.Join(wsDir, "chatSessions", "s.jsonl"), "devin-gui"); got != "/Users/m/repo" {
-		t.Fatalf("inferWorkspace = %q, want /Users/m/repo", got)
+	if !strings.Contains(db.Note, "sessions.db") {
+		t.Fatalf("the Devin note must name the single sessions.db, got %q", db.Note)
 	}
 }
 
@@ -179,5 +194,19 @@ func TestConfigDirEnvVarsWin(t *testing.T) {
 	t.Setenv("CODEX_HOME", dir)
 	if got := storePath("codex", "jsonl-sessions"); got != filepath.Join(dir, "sessions") {
 		t.Fatalf("storePath = %q, want the $CODEX_HOME sessions dir", got)
+	}
+}
+
+// Verified against a real Devin desktop install in 2026-08-29: the desktop
+// keeps no separate chat store — it drives the Devin CLI through an ACP
+// connector and every session lands in the one sessions.db (all 68 rows in the
+// verified DB carried backend_type Windsurf). That replaced the earlier claim
+// of encrypted ~/.codeium/windsurf/cascade conversations, which is retired
+// along with the devin-gui provider. See docs/adr/2-devin-single-sessions-db.md.
+func TestDevinHasNoDesktopCascadeStore(t *testing.T) {
+	for _, key := range StoreKeys() {
+		if strings.Contains(key, "devin-gui") {
+			t.Fatalf("devin-gui must not appear in config keys, got %q", key)
+		}
 	}
 }

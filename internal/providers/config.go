@@ -19,13 +19,16 @@ import (
 // Location: ~/.config/crossmemcli/config.json, or $CROSSMEM_CONFIG.
 //
 //	{
+//	  "defaults": { "mode": "full", "limit": 5 },
 //	  "stores": {
-//	    "devin:sqlite-sessions": "%APPDATA%/Cognition/cli/sessions.db",
+//	    "devin:sqlite-sessions": "%APPDATA%/devin/cli/sessions.db",
 //	    "claude": ["D:/agents/.claude/projects"]
 //	  },
 //	  "extraStores": {
 //	    "opencode": "~/work/opencode/opencode*.db"
-//	  }
+//	  },
+//	  "dumpDir": "~/.assets/convdump",
+//	  "sync": { "remote": "hetzbox:companydata/convdump" }
 //	}
 //
 // Keys are "provider:kind" (see `crossmem scan` for every kind), or a bare
@@ -36,6 +39,9 @@ import (
 type Config struct {
 	// Path is where the config was loaded from, or would be loaded from.
 	Path string `json:"path"`
+	// Defaults set what the CLI does when a flag is not given. A flag on the
+	// command line always wins.
+	Defaults Defaults `json:"defaults"`
 	// Exists reports whether that file is present.
 	Exists bool `json:"exists"`
 	// Stores replaces the built-in candidates for a store, keyed by
@@ -43,12 +49,48 @@ type Config struct {
 	Stores map[string][]string `json:"stores,omitempty"`
 	// ExtraStores appends to the built-in candidates, same key form.
 	ExtraStores map[string][]string `json:"extraStores,omitempty"`
+	// DumpDir is where `crossmem export` writes the portable dump and where
+	// `crossmem sync` pushes from (or pulls into). Defaults to
+	// ~/.assets/convdump.
+	DumpDir string `json:"dumpDir,omitempty"`
+	// Sync holds the rclone remote used by `crossmem sync`.
+	Sync SyncConfig `json:"sync,omitempty"`
 }
+
+// SyncConfig configures `crossmem sync`, which pushes the dump directory to an
+// rclone remote with `rclone copy` (or `rclone sync` with --prune).
+type SyncConfig struct {
+	// Remote is the rclone destination, e.g. "hetzbox:companydata/convdump".
+	Remote string `json:"remote,omitempty"`
+}
+
+// Defaults is the "how should crossmem behave for me" half of the config.
+// Excerpt size is the setting people actually have a standing preference
+// about: some always want the compact summary, others always want the full
+// transcript, and re-typing --full on every call is friction.
+type Defaults struct {
+	// Mode is "summary" or "full". Empty means summary.
+	Mode string `json:"mode,omitempty"`
+	// Limit is the default session count for list/load/update. Zero means the
+	// per-command built-in default.
+	Limit int `json:"limit,omitempty"`
+}
+
+const (
+	ModeSummary = "summary"
+	ModeFull    = "full"
+)
+
+// Full reports whether the configured default asks for full excerpts.
+func (d Defaults) Full() bool { return d.Mode == ModeFull }
 
 // configFile is the on-disk shape; pathList accepts a string or a list.
 type configFile struct {
+	Defaults    Defaults            `json:"defaults"`
 	Stores      map[string]pathList `json:"stores"`
 	ExtraStores map[string]pathList `json:"extraStores"`
+	DumpDir     string              `json:"dumpDir"`
+	Sync        SyncConfig          `json:"sync"`
 }
 
 type pathList []string
@@ -93,8 +135,11 @@ func LoadConfig() (Config, error) {
 	if err := json.Unmarshal(data, &file); err != nil {
 		return config, fmt.Errorf("parse %s: %w", path, err)
 	}
+	config.Defaults = file.Defaults
 	config.Stores = toStringMap(file.Stores)
 	config.ExtraStores = toStringMap(file.ExtraStores)
+	config.DumpDir = file.DumpDir
+	config.Sync = file.Sync
 	if err := config.validate(); err != nil {
 		return config, fmt.Errorf("%s: %w", path, err)
 	}
@@ -115,6 +160,14 @@ func toStringMap(in map[string]pathList) map[string][]string {
 // validate rejects keys that address no known store, so a typo surfaces as an
 // error instead of silently doing nothing.
 func (c Config) validate() error {
+	switch c.Defaults.Mode {
+	case "", ModeSummary, ModeFull:
+	default:
+		return fmt.Errorf("defaults.mode is %q, want %q or %q", c.Defaults.Mode, ModeSummary, ModeFull)
+	}
+	if c.Defaults.Limit < 0 {
+		return fmt.Errorf("defaults.limit is %d, want a positive number", c.Defaults.Limit)
+	}
 	for _, section := range []map[string][]string{c.Stores, c.ExtraStores} {
 		for key := range section {
 			if !knownStoreKey(key) {
@@ -241,15 +294,28 @@ func EffectiveStores() []StoreCandidate {
 
 // configTemplate keeps its guidance in a top-level "readme" key, which the
 // parser ignores, so the file stays valid JSON and passes validation as-is.
+// UserDefaults exposes the configured defaults to the CLI layer.
+func UserDefaults() Defaults { return userConfig().Defaults }
+
 const configTemplate = `{
   "readme": [
     "crossmem store overrides. Keys are provider:kind (run 'crossmem config' for the full list) or a bare provider for its primary store.",
     "Values are a path string or a list of them; ~, %VAR%, $VAR and * globs are all expanded. A path whose env var is unset on this machine is skipped.",
-    "'stores' replaces the built-in locations for a store; 'extraStores' keeps them and adds more."
+    "'stores' replaces the built-in locations for a store; 'extraStores' keeps them and adds more.",
+    "'defaults' sets what happens with no flags: mode is 'summary' or 'full', limit is a session count.",
+    "'dumpDir' sets where 'crossmem export' writes and 'crossmem sync' pushes from (default ~/.assets/convdump).",
+    "'sync.remote' is the rclone destination for 'crossmem sync', e.g. 'hetzbox:companydata/convdump'."
   ],
+  "defaults": {
+    "mode": "summary"
+  },
   "stores": {
   },
   "extraStores": {
+  },
+  "dumpDir": "",
+  "sync": {
+    "remote": ""
   }
 }
 `

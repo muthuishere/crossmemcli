@@ -45,11 +45,23 @@ func TestSkillsSubcommandRemoved(t *testing.T) {
 // The --provider help text is hand-written, so it can silently fall behind
 // when a provider is added. Every provider the engine knows must appear in it.
 func TestProviderHelpListsEveryProvider(t *testing.T) {
-	for _, help := range map[string]string{"list": listHelpText, "load": loadHelpText, "update": updateHelpText} {
+	for _, help := range map[string]string{"list": listHelpText, "load": loadHelpText, "update": updateHelpText, "export": exportHelpText} {
 		for _, provider := range providers.Providers() {
 			if !strings.Contains(help, provider) {
 				t.Fatalf("help text does not mention provider %q:\n%s", provider, help)
 			}
+		}
+	}
+}
+
+func TestExportImportSyncInHelp(t *testing.T) {
+	for _, cmd := range []string{"export", "import", "sync"} {
+		var stdout, stderr bytes.Buffer
+		if err := Run([]string{"help", cmd}, &stdout, &stderr); err != nil {
+			t.Fatalf("help %s returned error: %v", cmd, err)
+		}
+		if !strings.Contains(stdout.String(), "Usage: crossmem "+cmd) {
+			t.Fatalf("%s help missing usage:\n%s", cmd, stdout.String())
 		}
 	}
 }
@@ -60,7 +72,7 @@ func TestConfigCommandReportsStores(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 	out := stdout.String()
-	for _, want := range []string{"config:", "devin:sqlite-sessions", "devin-gui:vscode-workspace-storage", "looks in:"} {
+	for _, want := range []string{"config:", "devin:sqlite-sessions", "opencode:sqlite-sessions", "looks in:"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("config output missing %q:\n%s", want, out)
 		}

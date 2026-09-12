@@ -40,14 +40,14 @@ func TestLoadConfigMissingFileIsNotAnError(t *testing.T) {
 // A value may be a single path string or a list of them — people write both.
 func TestLoadConfigAcceptsStringOrList(t *testing.T) {
 	t.Setenv("CROSSMEM_CONFIG", writeConfig(t, `{
-	  "stores": {"devin": "D:/agents/Cognition/cli/sessions.db"},
+	  "stores": {"devin": "D:/agents/devin/cli/sessions.db"},
 	  "extraStores": {"claude:jsonl-projects": ["~/one", "~/two"]}
 	}`))
 	config, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"D:/agents/Cognition/cli/sessions.db"}; !reflect.DeepEqual(config.Stores["devin"], want) {
+	if want := []string{"D:/agents/devin/cli/sessions.db"}; !reflect.DeepEqual(config.Stores["devin"], want) {
 		t.Fatalf("stores = %v, want %v", config.Stores["devin"], want)
 	}
 	if want := []string{"~/one", "~/two"}; !reflect.DeepEqual(config.ExtraStores["claude:jsonl-projects"], want) {
@@ -99,5 +99,29 @@ func TestConfigOverrideRepointsDevinStore(t *testing.T) {
 
 	if got := devinDB(); got != db {
 		t.Fatalf("devinDB() = %q, want %q", got, db)
+	}
+}
+
+// A standing preference for full excerpts belongs in the config, not in every
+// command line.
+func TestDefaultsModeAndValidation(t *testing.T) {
+	t.Setenv("CROSSMEM_CONFIG", writeConfig(t, `{"defaults":{"mode":"full","limit":3}}`))
+	config, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.Defaults.Full() || config.Defaults.Limit != 3 {
+		t.Fatalf("defaults = %+v", config.Defaults)
+	}
+
+	t.Setenv("CROSSMEM_CONFIG", writeConfig(t, `{"defaults":{"mode":"verbose"}}`))
+	if _, err := LoadConfig(); err == nil || !strings.Contains(err.Error(), "defaults.mode") {
+		t.Fatalf("an unknown mode must be rejected, got %v", err)
+	}
+
+	t.Setenv("CROSSMEM_CONFIG", writeConfig(t, `{}`))
+	config, err = LoadConfig()
+	if err != nil || config.Defaults.Full() {
+		t.Fatalf("summary must remain the built-in default: %+v %v", config.Defaults, err)
 	}
 }

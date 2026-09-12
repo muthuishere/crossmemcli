@@ -76,5 +76,6 @@ func interestingFile(name string) bool {
 		strings.HasSuffix(lower, ".db") ||
 		strings.HasSuffix(lower, ".log") ||
 		strings.HasSuffix(lower, ".json") ||
+		strings.HasSuffix(lower, ".pb") ||
 		lower == "state.vscdb"
 }
