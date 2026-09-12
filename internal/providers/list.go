@@ -90,6 +90,9 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 	if opts.Questions {
 		sessions = withQuestions(sessions)
 	}
+	for i := range sessions {
+		sessions[i].Ago = relativeAgo(sessions[i].Modified)
+	}
 	return sessions, nil
 }
 

@@ -25,17 +25,19 @@ across tools, and guessing wastes the tokens it exists to save.
 
 ## The load flow (the hot path)
 
+**Always show the folder's sessions and wait for a confirm before loading.**
+Do not silently pick one. The user needs to see the agent and how long ago it
+was, then say yes — or pick by summary.
+
 **1. List this folder's recent sessions.**
 
 ```sh
 crossmem list . --limit 5
 ```
 
-Searches every tool, newest first. Add `--json` when you want to pick
-programmatically — fields are `provider`, `ref`, `workspace`, `title`,
-`firstQuestion`, `lastQuestion`, `modified`. Add `--provider codex` when the user
-names a tool ("what was I doing in Codex"). Add `--no-questions` for a fast list
-when you only need paths.
+`--json` if you want to pick programmatically — fields include `provider`,
+`ago` ("15 hours ago"), `modified`, `ref`, `title`, `firstQuestion`,
+`lastQuestion`. Add `--provider codex` when they name a tool.
 
 The `ref` is the handle you pass to `load`: a transcript path, or
 `devin:<id>` / `opencode:<id>` / `copilot-cli:<id>`.
@@ -43,20 +45,30 @@ The `ref` is the handle you pass to `load`: a transcript path, or
 **The session you are in right now is already excluded** — crossmem detects it from
 the agent's own session id, automatically for Claude Code, the Devin CLI, and Codex
 (`--include-current` brings it back). Copilot and OpenCode export no session id, so
-inside one of those the newest row may be this very conversation — its
-`first`/`last` will read as the request you are handling now. Skip it, and export
-`CROSSMEM_CURRENT_SESSION=<id>` to have crossmem filter it for you.
+inside one of those the newest row may be this very conversation — skip it.
 
-**2. Choose by content, not by recency.**
+**2. Show them, then ask. Never auto-load.**
 
-- **`lastQuestion` describes unfinished work** matching what the user now wants —
-  strongest signal. This is usually where they stopped.
-- **`firstQuestion` states the goal** they are now referring to — next strongest.
-- **Recency** is a tiebreak between equal candidates, never the reason on its own.
+Present a numbered list in this shape (agent, recency, summary):
 
-If two or more are plausibly right, show a short numbered list (title / first /
-last) and ask. Guessing wrong costs them a whole reconstructed context. One clear
-winner means just load it.
+```
+1. claude · 15 hours ago · export conversations as q&a
+2. codex  · 2 days ago · windows store paths
+```
+
+Then confirm:
+
+- **One session, or they just said "resume" / "where did I leave off":**
+  "There's a **claude** session from **15 hours ago**: *export conversations as q&a*. Load it?"
+- **A summary matches what they asked for:**
+  "This looks like the **codex** session from **2 days ago**: *windows store paths*. Load that one?"
+- **Several plausible sessions:** show the list and ask which number, or none.
+
+Wait for yes / a number / a summary. Only then load. Guessing wrong costs them
+a whole reconstructed context.
+
+`lastQuestion` is the strongest content signal (unfinished work). `firstQuestion`
+is the goal. Recency is how you *label* the row, not why you pick it on your own.
 
 **3. Load the chosen session in full.**
 

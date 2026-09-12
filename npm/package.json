@@ -1,6 +1,6 @@
 {
   "name": "@muthuishere/crossmem",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Portable context memory across local agent tools.",
   "keywords": [
     "crossmem",
@@ -34,11 +34,11 @@
     "README.md"
   ],
   "optionalDependencies": {
-    "@muthuishere/crossmem-darwin-arm64": "0.1.9",
-    "@muthuishere/crossmem-darwin-x64": "0.1.9",
-    "@muthuishere/crossmem-linux-arm64": "0.1.9",
-    "@muthuishere/crossmem-linux-x64": "0.1.9",
-    "@muthuishere/crossmem-windows-x64": "0.1.9"
+    "@muthuishere/crossmem-darwin-arm64": "0.1.10",
+    "@muthuishere/crossmem-darwin-x64": "0.1.10",
+    "@muthuishere/crossmem-linux-arm64": "0.1.10",
+    "@muthuishere/crossmem-linux-x64": "0.1.10",
+    "@muthuishere/crossmem-windows-x64": "0.1.10"
   },
   "os": [
     "darwin",

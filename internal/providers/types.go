@@ -18,12 +18,15 @@ type Session struct {
 	// Ref is the uniform handle for loading this session, regardless of how the
 	// provider stores it: a transcript file path for the JSONL tools, or
 	// "devin:<id>" for the SQLite-backed Devin store. Pass it to load --session.
-	Ref       string    `json:"ref"`
-	Path      string    `json:"path"`
-	Bytes     int64     `json:"bytes"`
-	Modified  time.Time `json:"modified"`
-	Workspace string    `json:"workspace,omitempty"`
-	Title     string    `json:"title,omitempty"`
+	Ref      string    `json:"ref"`
+	Path     string    `json:"path"`
+	Bytes    int64     `json:"bytes"`
+	Modified time.Time `json:"modified"`
+	// Ago is Modified as a short relative string ("5 mins ago", "15 hours ago")
+	// filled at list time so a caller can show recency without computing it.
+	Ago       string `json:"ago,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
+	Title     string `json:"title,omitempty"`
 	// FirstQuestion and LastQuestion are the session's opening and closing user
 	// messages. A title alone rarely says what a session became; the first and
 	// last thing asked is what lets a caller tell two sessions apart and pick

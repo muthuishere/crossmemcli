@@ -72,9 +72,9 @@ List available local sessions, most recent first. Pass a folder (positional or
 --folder) to show only sessions whose real working directory is that folder,
 across all tools — useful for picking which recent session to load.
 
-Each row shows the session's title plus the FIRST and LAST thing the user asked
-in it. A title says what a session was called; the first and last question say
-what it became, which is what lets you tell two sessions in one folder apart.
+Each row is numbered with the agent, how long ago it ran (e.g. "15 hours ago"),
+the local date/time, and the first/last question so you can confirm which
+session to load.
 
 The session this command is running inside is excluded by default — resuming
 your own live session just hands you back the context you already have. Pass
@@ -726,26 +726,29 @@ func runList(args []string, stdout io.Writer) error {
 	if *jsonOut {
 		return writeJSON(stdout, sessions)
 	}
-	for _, session := range sessions {
+	for i, session := range sessions {
 		marker := ""
 		if session.Current {
 			marker = "  [current session]"
 		}
-		fmt.Fprintf(stdout, "%s %-11s %9d %s%s\n", session.Modified.Format("2006-01-02T15:04:05Z07:00"), session.Provider, session.Bytes, session.Ref, marker)
+		ago := session.Ago
+		if ago == "" {
+			ago = session.Modified.Format("2006-01-02 15:04")
+		}
+		fmt.Fprintf(stdout, "%d. %s  (%s)  %s%s\n", i+1, session.Provider, ago, session.Modified.Local().Format("2006-01-02 15:04"), marker)
+		if session.LastQuestion != "" {
+			fmt.Fprintf(stdout, "  last:      %s\n", oneLine(session.LastQuestion, 140))
+		}
+		if session.FirstQuestion != "" && session.FirstQuestion != session.LastQuestion {
+			fmt.Fprintf(stdout, "  first:     %s\n", oneLine(session.FirstQuestion, 140))
+		}
+		if session.Title != "" && session.Title != session.FirstQuestion && session.Title != session.LastQuestion {
+			fmt.Fprintf(stdout, "  title:     %s\n", oneLine(session.Title, 140))
+		}
 		if session.Workspace != "" {
 			fmt.Fprintf(stdout, "  workspace: %s\n", session.Workspace)
 		}
-		if session.Title != "" {
-			fmt.Fprintf(stdout, "  title:     %s\n", oneLine(session.Title, 140))
-		}
-		// The opening and closing question are what distinguish two sessions in
-		// the same folder; print both when they differ.
-		if session.FirstQuestion != "" {
-			fmt.Fprintf(stdout, "  first:     %s\n", oneLine(session.FirstQuestion, 140))
-		}
-		if session.LastQuestion != "" && session.LastQuestion != session.FirstQuestion {
-			fmt.Fprintf(stdout, "  last:      %s\n", oneLine(session.LastQuestion, 140))
-		}
+		fmt.Fprintf(stdout, "  ref:       %s\n", session.Ref)
 	}
 	return nil
 }
