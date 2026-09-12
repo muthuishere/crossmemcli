@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/muthuishere/crossmemcli/internal/diag"
@@ -128,11 +127,8 @@ func copilotCLIPreview(sessionID string, maxChars int) string {
 		if text := roleText("assistant", assistant.String); text != "" {
 			chunks = append(chunks, text)
 		}
-		if len(strings.Join(chunks, "\n")) > maxChars {
-			break
-		}
 	}
-	return truncate(strings.Join(chunks, "\n"), maxChars)
+	return fitPreview(chunks, "\n", maxChars)
 }
 
 // parseTimeFlexible accepts the RFC3339 timestamps the Copilot CLI writes

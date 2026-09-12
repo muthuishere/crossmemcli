@@ -66,6 +66,22 @@ func TestExportImportSyncInHelp(t *testing.T) {
 	}
 }
 
+func TestExportHelpMentionsQA(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := Run([]string{"help", "export"}, &stdout, &stderr); err != nil {
+		t.Fatalf("help export: %v", err)
+	}
+	out := stdout.String()
+	if strings.Contains(out, "--raw") || strings.Contains(out, "raw.jsonl") {
+		t.Fatalf("export help still mentions raw:\n%s", out)
+	}
+	for _, want := range []string{"--qa", "qa.jsonl", "sessionId", "folder"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("export help missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestConfigCommandReportsStores(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := Run([]string{"config"}, &stdout, &stderr); err != nil {

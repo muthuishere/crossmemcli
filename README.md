@@ -143,6 +143,23 @@ crossmem sync --remote hetzbox:companydata/convdump
 crossmem sync --pull --remote hetzbox:companydata/convdump
 ```
 
+Conversation export (`--qa`) writes one `qa.jsonl` of every question, the full
+answer, and the tools/results/thinking in between — **no agent name, no model
+name, no tokens**. Each line is `sessionId`, `folder`, `q`, `a`, `time`,
+`messages`. The store dump above is unchanged so `import`/`sync` still
+round-trip original transcripts.
+
+```sh
+crossmem export --qa --out ~/conversations
+crossmem export --qa .
+crossmem export --qa --dump --out ~/.assets/convdump
+```
+
+```text
+~/conversations/
+  qa.jsonl     # {"sessionId","folder","q","a","time","messages":[{role,name,content}]}
+```
+
 Set a standing remote and dump dir in the config instead of typing them every
 time:
 

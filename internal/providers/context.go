@@ -210,11 +210,8 @@ func jsonlPreview(path string, provider string, maxChars int, maxLines int) stri
 			continue
 		}
 		chunks = append(chunks, text)
-		if len(strings.Join(chunks, "\n\n")) > maxChars {
-			break
-		}
 	}
-	return truncate(strings.Join(chunks, "\n\n"), maxChars)
+	return fitPreview(chunks, "\n\n", maxChars)
 }
 
 func extractJSONLText(raw []byte, provider string) string {
@@ -373,15 +370,15 @@ func devinPreview(sessionID string, maxChars int) string {
 	}
 	var chunks []string
 	seen := map[string]bool{}
-	for i := len(raws) - 1; i >= 0; i-- {
-		text := extractDevin(raws[i])
+	for _, raw := range raws {
+		text := extractDevin(raw)
 		if text == "" || seen[text] {
 			continue
 		}
 		seen[text] = true
 		chunks = append(chunks, text)
 	}
-	return truncate(strings.Join(chunks, "\n\n"), maxChars)
+	return fitPreview(chunks, "\n\n", maxChars)
 }
 
 func extractDevin(raw string) string {
@@ -439,6 +436,67 @@ func stringValue(value any) string {
 
 func normalize(text string) string {
 	return strings.Join(strings.Fields(text), " ")
+}
+
+// fitPreview assembles conversation chunks into a preview no longer than
+// maxChars. Resuming needs the END of a session — where the work stopped — so
+// when the conversation does not fit, keep the opening (which states the goal)
+// and the most recent turns, and elide the middle. Truncating from the head
+// alone spends the whole budget on the first few turns and never reaches the
+// current state, which is the one thing a resuming agent has to know.
+func fitPreview(chunks []string, separator string, maxChars int) string {
+	if maxChars <= 0 || len(chunks) == 0 {
+		return ""
+	}
+	// A single pasted file can be longer than the whole budget. Cap each turn
+	// so one paste cannot crowd out the conversation around it — but only once
+	// there are enough turns for the trade to be worth making.
+	if len(chunks) >= 6 {
+		capped := make([]string, 0, len(chunks))
+		for _, chunk := range chunks {
+			capped = append(capped, condenseChunk(chunk, maxChars/6))
+		}
+		chunks = capped
+	}
+	joined := strings.Join(chunks, separator)
+	if len(joined) <= maxChars {
+		return joined
+	}
+
+	const elision = "\n\n[... middle of the session elided; the opening and the most recent turns are kept ...]\n\n"
+	if maxChars <= len(elision) {
+		return truncate(joined, maxChars)
+	}
+	headBudget := (maxChars - len(elision)) * 3 / 10
+	tailBudget := maxChars - len(elision) - headBudget
+	head := snapForward(joined[:headBudget])
+	tail := snapBackward(joined[len(joined)-tailBudget:])
+	return strings.TrimSpace(head) + elision + strings.TrimSpace(tail)
+}
+
+// condenseChunk caps one turn, marking how much was dropped so the agent knows
+// it is looking at an excerpt rather than a complete message.
+func condenseChunk(chunk string, max int) string {
+	if max <= 0 || len(chunk) <= max {
+		return chunk
+	}
+	return strings.TrimSpace(chunk[:max]) + fmt.Sprintf(" ...[%d chars trimmed]", len(chunk)-max)
+}
+
+// snapForward and snapBackward move a cut to the nearest line boundary so a
+// slice does not begin or end mid-word, when one is close enough to be worth it.
+func snapForward(text string) string {
+	if i := strings.LastIndex(text, "\n"); i > len(text)/2 {
+		return text[:i]
+	}
+	return text
+}
+
+func snapBackward(text string) string {
+	if i := strings.Index(text, "\n"); i >= 0 && i < len(text)/2 {
+		return text[i+1:]
+	}
+	return text
 }
 
 func truncate(text string, max int) string {

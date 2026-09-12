@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/muthuishere/crossmemcli/internal/diag"
 )
@@ -143,11 +142,8 @@ func openCodePreviewFromDB(dbPath string, sessionID string, maxChars int) string
 			continue
 		}
 		chunks = append(chunks, text)
-		if len(strings.Join(chunks, "\n")) > maxChars {
-			break
-		}
 	}
-	return truncate(strings.Join(chunks, "\n"), maxChars)
+	return fitPreview(chunks, "\n", maxChars)
 }
 
 // extractOpenCode turns one (message, part) pair into "role: text" for text

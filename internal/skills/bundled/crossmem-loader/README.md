@@ -1,6 +1,8 @@
 # crossmem-loader
 
-Agent skill for loading portable context from local agent histories.
+Agent skill for portable agent memory across local tools — resuming prior work,
+persisting a durable brief, moving history between machines, and diagnosing a
+store crossmem cannot find.
 
 Install globally through the CLI:
 
@@ -8,11 +10,12 @@ Install globally through the CLI:
 crossmem install --skills
 ```
 
-Typical usage inside an agent session:
+Layout:
 
-```sh
-crossmem load . --limit 5
-crossmem load /path/to/repo --limit 5
-```
+- `SKILL.md` — routing table, the load hot path, guardrails vs. history, safety.
+- `references/persisting.md` — `crossmem update` and the committable `.crossmem/`.
+- `references/portability.md` — `export` / `sync` / `import` between machines, plus `export --qa` for a training/RAG jsonl.
+- `references/troubleshooting.md` — `scan`, `config`, env overrides, debug logging.
 
-The skill decides whether to summarize the loaded context or request a fuller bundle. The CLI remains the deterministic local context source.
+The CLI stays the deterministic local context source; the skill decides which
+session matters and what in it is signal.

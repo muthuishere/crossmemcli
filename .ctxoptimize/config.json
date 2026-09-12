@@ -18,9 +18,6 @@
     },
     {
       "path": "npm/platforms/windows-x64"
-    },
-    {
-      "path": "scripts/devin-gui-decrypt"
     }
   ],
   "wiki": false

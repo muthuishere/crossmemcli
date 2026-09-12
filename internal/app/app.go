@@ -30,7 +30,7 @@ Commands:
   context [options] [folder]              alias for load
   update [options] [folder]               write .crossmem/context.md and source manifests
   guardrails [folder]                     print active repo instruction file references
-  export [options]                        copy all stores + instructions into one portable dump
+  export [options]                        copy stores into a dump, or export plain Q&A JSONL
   import [options]                        restore a dump back into this machine's stores
   sync [options]                          push (or pull) the dump dir with rclone
   config [options]                        show where each store is looked for, and override it
@@ -46,6 +46,7 @@ Examples:
   crossmem load /path/to/repo --out /tmp/context.md
   crossmem update .
   crossmem export --out ~/.assets/convdump
+  crossmem export --qa --out ~/conversations
   crossmem import --in ~/.assets/convdump --dry-run
   crossmem sync --remote hetzbox:companydata/convdump
   crossmem help load
@@ -151,25 +152,38 @@ Examples:
   crossmem update /path/to/repo --provider claude --limit 5
 `
 
-const exportHelpText = `Usage: crossmem export [options]
+const exportHelpText = `Usage: crossmem export [options] [folder]
 
-Copy every discoverable store (Claude, Codex, Copilot, Devin, OpenCode
-sessions) plus the well-known global instruction and memory files into a single
-portable dump directory with a manifest.json. The dump is the one format
-` + "`import`" + ` reads back and ` + "`sync`" + ` pushes to a remote.
+Two jobs, one command:
 
-Credential files, auth databases, env files, and vault/cache/node_modules
-directories are never exported.
+  Store dump (default, no --qa): copy every discoverable store (Claude, Codex,
+  Copilot, Devin, OpenCode sessions) plus the well-known global instruction and
+  memory files into a portable dump directory with a manifest.json. That dump
+  is the one format ` + "`import`" + ` reads back and ` + "`sync`" + ` pushes to a
+  remote. Credential files, auth databases, env files, and
+  vault/cache/node_modules directories are never exported.
+
+  Conversation export (--qa): write one qa.jsonl of every question, the full
+  answer, and everything that happened in between (tools, results, thinking).
+  No agent name, no model name, no tokens. Each line is sessionId, folder,
+  q, a, time, messages. Pass a folder to keep only sessions whose working
+  directory is that folder; omit it to export the whole machine.
 
 Options:
-  --out <dir>                             dump directory (default: dumpDir from config, else ~/.assets/convdump)
+  --out <dir>                             output directory (default: dumpDir from config, else ~/.assets/convdump)
   --provider <name>                       claude, codex, copilot, copilot-cli, devin, opencode, or all (default: all)
-  --json                                  print the manifest as JSON
+  --qa                                    write qa.jsonl (sessionId, folder, q, a, time, messages)
+  --dump                                  also copy the original stores (implied when --qa is omitted)
+  --limit <number>                        max sessions for --qa (default: all)
+  --json                                  print the result as JSON
   -h, --help                              display help for command
 
 Examples:
   crossmem export
   crossmem export --out ~/.assets/convdump
+  crossmem export --qa --out ~/conversations
+  crossmem export --qa .
+  crossmem export --qa --dump --out ~/.assets/convdump
   crossmem export --provider claude --json
 `
 
@@ -453,34 +467,87 @@ func runExport(args []string, stdout io.Writer) error {
 		_, _ = fmt.Fprint(stdout, exportHelpText)
 		return nil
 	}
+	args, positional := extractPositionalFolder(args)
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	out := fs.String("out", "", "dump directory")
 	provider := fs.String("provider", "all", "provider")
-	jsonOut := fs.Bool("json", false, "print the manifest as JSON")
+	jsonOut := fs.Bool("json", false, "print the result as JSON")
+	qa := fs.Bool("qa", false, "write plain Q&A jsonl with no agent or model names")
+	dump := fs.Bool("dump", false, "copy original stores")
+	limit := fs.Int("limit", 0, "max sessions for qa")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	sp := startSpinner(os.Stderr, "Exporting stores…")
-	manifest, err := providers.ExportDump(providers.ExportOptions{Out: *out, Provider: *provider})
-	sp.Stop()
-	if err != nil {
-		return err
+	if positional == "" && fs.NArg() > 0 {
+		positional = fs.Arg(0)
 	}
+	wantQA := *qa
+	wantDump := *dump || !wantQA
+
+	label := "Exporting stores…"
+	switch {
+	case wantQA && wantDump:
+		label = "Exporting…"
+	case wantQA:
+		label = "Exporting conversations…"
+	}
+	sp := startSpinner(os.Stderr, label)
+
+	var manifest providers.DumpManifest
+	var conv providers.ConvExportResult
+	var err error
+	if wantDump {
+		manifest, err = providers.ExportDump(providers.ExportOptions{Out: *out, Provider: *provider})
+		if err != nil {
+			sp.Stop()
+			return err
+		}
+	}
+	if wantQA {
+		convOut := *out
+		if convOut == "" && wantDump {
+			convOut = manifest.Out
+		}
+		conv, err = providers.ExportConversations(providers.ConvExportOptions{
+			Out:      convOut,
+			Provider: *provider,
+			CWD:      positional,
+			Limit:    *limit,
+		})
+		if err != nil {
+			sp.Stop()
+			return err
+		}
+	}
+	sp.Stop()
+
 	if *jsonOut {
+		if wantDump && wantQA {
+			return writeJSON(stdout, map[string]any{"dump": manifest, "conversations": conv})
+		}
+		if wantQA {
+			return writeJSON(stdout, conv)
+		}
 		return writeJSON(stdout, manifest)
 	}
-	totalFiles, totalBytes := 0, int64(0)
-	for _, store := range manifest.Stores {
-		totalFiles += store.Files
-		totalBytes += store.Bytes
+
+	if wantQA {
+		fmt.Fprintf(stdout, "Exported %d sessions, %d Q&A pairs to %s\n", conv.Sessions, conv.QAPairs, conv.QAFile)
 	}
-	fmt.Fprintf(stdout, "Exported %d stores (%d files, %s) to %s\n",
-		len(manifest.Stores), totalFiles, humanBytes(totalBytes), manifest.Out)
-	for _, store := range manifest.Stores {
-		fmt.Fprintf(stdout, "  %-10s %-24s %6d files %10s\n", store.Provider, store.Kind, store.Files, humanBytes(store.Bytes))
+	if wantDump {
+		totalFiles, totalBytes := 0, int64(0)
+		for _, store := range manifest.Stores {
+			totalFiles += store.Files
+			totalBytes += store.Bytes
+		}
+		fmt.Fprintf(stdout, "Exported %d stores (%d files, %s) to %s\n",
+			len(manifest.Stores), totalFiles, humanBytes(totalBytes), manifest.Out)
+		for _, store := range manifest.Stores {
+			fmt.Fprintf(stdout, "  %-10s %-24s %6d files %10s\n", store.Provider, store.Kind, store.Files, humanBytes(store.Bytes))
+		}
+		fmt.Fprintf(stdout, "  instructions: %d, memory: %d\n", len(manifest.Instructions), len(manifest.Memory))
 	}
-	fmt.Fprintf(stdout, "  instructions: %d, memory: %d\n", len(manifest.Instructions), len(manifest.Memory))
 	return nil
 }
 
@@ -845,7 +912,7 @@ func extractPositionalFolder(args []string) ([]string, string) {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			filtered = append(filtered, arg)
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if flagTakesValue(arg) && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				filtered = append(filtered, args[i+1])
 				i++
 			}
@@ -858,6 +925,21 @@ func extractPositionalFolder(args []string) ([]string, string) {
 		filtered = append(filtered, arg)
 	}
 	return filtered, folder
+}
+
+func flagTakesValue(arg string) bool {
+	name := strings.TrimLeft(arg, "-")
+	if name == "" || strings.Contains(name, "=") {
+		return false
+	}
+	switch name {
+	case "json", "full", "include-current", "no-questions", "qa", "dump",
+		"dry-run", "force", "prune", "pull", "skills", "agents", "help", "h",
+		"version", "V", "init":
+		return false
+	default:
+		return true
+	}
 }
 
 func runTopLevelSkillAction(verb string, args []string, stdout io.Writer, stderr io.Writer) error {
