@@ -12,13 +12,13 @@ func TestCurrentSessionIsExcludedByDefault(t *testing.T) {
 		{Provider: "claude", ID: "older", Path: "/p/older.jsonl", Ref: "/p/older.jsonl"},
 	}
 
-	kept := markCurrent(append([]Session{}, sessions...), false)
+	kept := defaultClient().markCurrent(append([]Session{}, sessions...), false)
 	if len(kept) != 1 || kept[0].ID != "older" {
 		t.Fatalf("the live session was not dropped: %+v", kept)
 	}
 
 	// --include-current keeps it, flagged, so a caller can still see it.
-	all := markCurrent(append([]Session{}, sessions...), true)
+	all := defaultClient().markCurrent(append([]Session{}, sessions...), true)
 	if len(all) != 2 {
 		t.Fatalf("include-current should keep every session, got %d", len(all))
 	}
@@ -46,7 +46,7 @@ func TestCurrentSessionMatchesByTranscriptFilename(t *testing.T) {
 func TestCurrentSessionEscapeHatchEnvVar(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	t.Setenv("CROSSMEM_CURRENT_SESSION", "one, two")
-	ids := currentSessionIDs()
+	ids := envCurrentSessionIDs()
 	if !ids["one"] || !ids["two"] {
 		t.Fatalf("comma-separated ids not parsed: %v", ids)
 	}
@@ -95,14 +95,14 @@ func TestCurrentSessionMatchingPerProvider(t *testing.T) {
 				t.Setenv(name, "")
 			}
 			t.Setenv(tc.envVar, tc.envID)
-			if !isCurrentSession(tc.session, currentSessionIDs()) {
+			if !isCurrentSession(tc.session, envCurrentSessionIDs()) {
 				t.Fatalf("%s did not identify the live session", tc.envVar)
 			}
 			// A different session of the same provider must not be swept up.
 			other := tc.session
 			other.ID = "someone-else"
 			other.Path = "/p/rollout-2026-08-16T21-41-02-deadbeef-0000-0000-0000-000000000000.jsonl"
-			if isCurrentSession(other, currentSessionIDs()) {
+			if isCurrentSession(other, envCurrentSessionIDs()) {
 				t.Fatalf("%s matched an unrelated session", tc.envVar)
 			}
 		})

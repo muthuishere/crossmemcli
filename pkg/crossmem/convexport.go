@@ -53,10 +53,10 @@ type ConvExportResult struct {
 	QAFile   string `json:"qaFile"`
 }
 
-// ExportConversations writes one qa.jsonl of full Q&A across sessions. Workers
+// exportConversations writes one qa.jsonl of full Q&A across sessions. Workers
 // read transcripts in parallel and a single writer flushes to a temp file that
 // is renamed into place.
-func ExportConversations(opts ConvExportOptions) (ConvExportResult, error) {
+func (c *Client) exportConversations(opts ConvExportOptions) (ConvExportResult, error) {
 	if opts.Provider == "" {
 		opts.Provider = "all"
 	}
@@ -67,7 +67,7 @@ func ExportConversations(opts ConvExportOptions) (ConvExportResult, error) {
 		}
 	}
 	if out == "" {
-		out = DefaultDumpDir()
+		out = c.defaultDumpDir()
 	}
 	out = expandPath(out)
 	if err := os.MkdirAll(out, 0o755); err != nil {
@@ -78,7 +78,7 @@ func ExportConversations(opts ConvExportOptions) (ConvExportResult, error) {
 	if limit <= 0 {
 		limit = allSessionsLimit
 	}
-	sessions, err := ListSessions(ListOptions{
+	sessions, err := c.listSessions(ListOptions{
 		Provider:       opts.Provider,
 		CWD:            opts.CWD,
 		Limit:          limit,
@@ -131,7 +131,7 @@ func ExportConversations(opts ConvExportOptions) (ConvExportResult, error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			for _, pair := range sessionQA(session) {
+			for _, pair := range c.sessionQA(session) {
 				line, err := marshalQA(pair)
 				if err != nil {
 					continue
@@ -196,10 +196,10 @@ type ConvImportResult struct {
 	Merged  bool   `json:"merged,omitempty"`
 }
 
-// ImportConversations copies a qa.jsonl into the destination directory.
+// importConversations copies a qa.jsonl into the destination directory.
 // --in may be the file itself or a directory that contains qa.jsonl.
-func ImportConversations(opts ConvImportOptions) (ConvImportResult, error) {
-	src, err := resolveQAFile(opts.In)
+func (c *Client) importConversations(opts ConvImportOptions) (ConvImportResult, error) {
+	src, err := c.resolveQAFile(opts.In)
 	if err != nil {
 		return ConvImportResult{}, err
 	}
@@ -215,7 +215,7 @@ func ImportConversations(opts ConvImportOptions) (ConvImportResult, error) {
 		}
 	}
 	if out == "" {
-		out = DefaultDumpDir()
+		out = c.defaultDumpDir()
 	}
 	out = expandPath(out)
 	dest := filepath.Join(out, qaJSONLName)
@@ -266,9 +266,9 @@ func samePath(a, b string) bool {
 	return os.SameFile(ai, bi)
 }
 
-func resolveQAFile(in string) (string, error) {
+func (c *Client) resolveQAFile(in string) (string, error) {
 	if in == "" {
-		in = DefaultDumpDir()
+		in = c.defaultDumpDir()
 	}
 	in = expandPath(in)
 	info, err := os.Stat(in)

@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
 const (
@@ -26,12 +24,12 @@ const (
 	previewWorkers = 24
 )
 
-// BuildContext renders a bundle of the most recent sessions matching the folder.
+// buildContext renders a bundle of the most recent sessions matching the folder.
 // crossmem is deterministic plumbing: it finds the sessions and emits their
 // conversation. Deciding what to keep, skip, or treat as noise is the consuming
 // agent's job (see the crossmem-loader skill).
-func BuildContext(opts ListOptions) (string, error) {
-	sessions, err := ListSessions(opts)
+func (c *Client) buildContext(opts ListOptions) (string, error) {
+	sessions, err := c.listSessions(opts)
 	if err != nil {
 		return "", err
 	}
@@ -39,63 +37,86 @@ func BuildContext(opts ListOptions) (string, error) {
 	if opts.Full {
 		maxChars = fullPreviewChars
 	}
-	bodies := computePreviews(sessions, maxChars)
+	bodies := c.computePreviews(sessions, maxChars)
 	return renderBundle(sessions, bodies, opts), nil
 }
 
 // BuildSessionContext renders a bundle for one specific session the user picked
 // from a list. ref is the uniform handle: a transcript file path for the JSONL
 // tools, or "devin:<id>" for the SQLite-backed Devin store.
-func BuildSessionContext(ref string, cwd string, full bool) (string, error) {
+// providerForPath names the provider that owns a transcript file. The store
+// roots this client actually lists from decide first, so a Ref from List always
+// resolves back — including stores relocated by $CLAUDE_CONFIG_DIR / $CODEX_HOME
+// or a config override, whose paths do not contain "/.claude/" or "/.codex/".
+func (c *Client) providerForPath(path string) string {
+	for _, root := range c.providerRoots("all") {
+		if sameOrChild(path, root.Path) {
+			return root.Provider
+		}
+	}
+	return inferProvider(path, "")
+}
+
+// resolveRef turns a handle from List into its Session: "devin:<id>",
+// "opencode:<id>", "copilot-cli:<id>", or a transcript file path.
+func (c *Client) resolveRef(ref string) (Session, error) {
 	var session Session
 	if id, ok := strings.CutPrefix(ref, "devin:"); ok {
-		s, err := loadDevinSession(id)
+		s, err := c.loadDevinSession(id)
 		if err != nil {
-			return "", err
+			return Session{}, err
 		}
 		session = s
 	} else if id, ok := strings.CutPrefix(ref, "opencode:"); ok {
-		s, err := loadOpenCodeSession(id)
+		s, err := c.loadOpenCodeSession(id)
 		if err != nil {
-			return "", err
+			return Session{}, err
 		}
 		session = s
 	} else if id, ok := strings.CutPrefix(ref, "copilot-cli:"); ok {
-		s, err := loadCopilotCLISession(id)
+		s, err := c.loadCopilotCLISession(id)
 		if err != nil {
-			return "", err
+			return Session{}, err
 		}
 		session = s
 	} else {
 		abs, err := filepath.Abs(expandHome(ref))
 		if err != nil {
-			return "", err
+			return Session{}, err
 		}
 		info, err := os.Stat(abs)
 		if err != nil {
-			return "", err
+			return Session{}, err
 		}
-		provider := inferProvider(abs, "")
+		provider := c.providerForPath(abs)
 		if provider == "unknown" {
-			return "", fmt.Errorf("unrecognized session path: %s", abs)
+			return Session{}, fmt.Errorf("unrecognized session path: %s", abs)
 		}
-		title, scwd := readJSONLMeta(abs, provider)
+		title, scwd := c.readJSONLMeta(abs, provider)
 		workspace := scwd
 		if workspace == "" {
-			workspace = inferWorkspace(abs, provider)
+			workspace = c.inferWorkspace(abs, provider)
 		}
 		session = Session{Provider: provider, Path: abs, Bytes: info.Size(), Modified: info.ModTime(), Workspace: workspace, Title: title}
+	}
+	return session, nil
+}
+
+func (c *Client) buildSessionContext(ref string, cwd string, full bool) (string, error) {
+	session, err := c.resolveRef(ref)
+	if err != nil {
+		return "", err
 	}
 	maxChars := briefPreviewChars
 	if full {
 		maxChars = fullPreviewChars
 	}
-	body := computePreviews([]Session{session}, maxChars)[0]
+	body := c.computePreviews([]Session{session}, maxChars)[0]
 	return renderBundle([]Session{session}, []string{body}, ListOptions{Provider: session.Provider, CWD: cwd, Full: full}), nil
 }
 
 // computePreviews extracts each session's cleaned conversation concurrently.
-func computePreviews(sessions []Session, maxChars int) []string {
+func (c *Client) computePreviews(sessions []Session, maxChars int) []string {
 	out := make([]string, len(sessions))
 	sem := make(chan struct{}, previewWorkers)
 	var wg sync.WaitGroup
@@ -108,13 +129,13 @@ func computePreviews(sessions []Session, maxChars int) []string {
 			s := sessions[i]
 			switch s.Provider {
 			case "devin":
-				out[i] = devinPreview(s.ID, maxChars)
+				out[i] = c.devinPreview(s.ID, maxChars)
 			case "opencode":
-				out[i] = openCodePreview(s.ID, maxChars)
+				out[i] = c.openCodePreview(s.ID, maxChars)
 			case "copilot-cli":
-				out[i] = copilotCLIPreview(s.ID, maxChars)
+				out[i] = c.copilotCLIPreview(s.ID, maxChars)
 			default:
-				out[i] = jsonlPreview(s.Path, s.Provider, maxChars, previewLines)
+				out[i] = c.jsonlPreview(s.Path, s.Provider, maxChars, previewLines)
 			}
 		}(i)
 	}
@@ -180,12 +201,12 @@ func titleOrBase(session Session) string {
 	return session.Path
 }
 
-func jsonlPreview(path string, provider string, maxChars int, maxLines int) string {
-	file, err := withRetry("open jsonl preview "+path, func() (*os.File, error) {
+func (c *Client) jsonlPreview(path string, provider string, maxChars int, maxLines int) string {
+	file, err := withRetry(c.log, "open jsonl preview "+path, func() (*os.File, error) {
 		return os.Open(path)
 	})
 	if err != nil {
-		diag.Debugf("jsonl preview path=%q provider=%s err=%q", path, provider, err)
+		c.log.debugf("jsonl preview path=%q provider=%s err=%q", path, provider, err)
 		return ""
 	}
 	defer file.Close()
@@ -337,26 +358,26 @@ func copilotResponseText(req map[string]any) string {
 	return ""
 }
 
-func devinPreview(sessionID string, maxChars int) string {
+func (c *Client) devinPreview(sessionID string, maxChars int) string {
 	if sessionID == "" {
 		return ""
 	}
-	dbPath := devinDB()
+	dbPath := c.devinDB()
 	if dbPath == "" {
 		return ""
 	}
 	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(250)")
 	if err != nil {
-		diag.Debugf("devin preview open db=%q err=%q", dbPath, err)
+		c.log.debugf("devin preview open db=%q err=%q", dbPath, err)
 		return ""
 	}
 	defer db.Close()
 
-	rows, err := withRetry("query devin preview", func() (*sql.Rows, error) {
+	rows, err := withRetry(c.log, "query devin preview", func() (*sql.Rows, error) {
 		return db.Query(`select chat_message from message_nodes where session_id = ? order by node_id desc limit 24`, sessionID)
 	})
 	if err != nil {
-		diag.Debugf("devin preview query session=%q err=%q", sessionID, err)
+		c.log.debugf("devin preview query session=%q err=%q", sessionID, err)
 		return ""
 	}
 	defer rows.Close()

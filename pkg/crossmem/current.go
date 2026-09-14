@@ -33,7 +33,7 @@ var currentSessionEnvVars = []string{
 	"CROSSMEM_CURRENT_SESSION",
 }
 
-func currentSessionIDs() map[string]bool {
+func envCurrentSessionIDs() map[string]bool {
 	ids := map[string]bool{}
 	for _, name := range currentSessionEnvVars {
 		for _, value := range strings.Split(os.Getenv(name), ",") {
@@ -75,8 +75,8 @@ func isCurrentSession(session Session, ids map[string]bool) bool {
 
 // markCurrent flags the caller's own sessions and, unless they were asked for,
 // drops them.
-func markCurrent(sessions []Session, includeCurrent bool) []Session {
-	ids := currentSessionIDs()
+func (c *Client) markCurrent(sessions []Session, includeCurrent bool) []Session {
+	ids := c.currentIDs
 	if len(ids) == 0 {
 		return sessions
 	}

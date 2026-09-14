@@ -81,7 +81,7 @@ func TestJSONLQuestionsReadsHeadAndTailOfALargeTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, last := jsonlQuestions(path, "claude")
+	first, last := defaultClient().jsonlQuestions(path, "claude")
 	if first != "FIRST QUESTION" {
 		t.Fatalf("first = %q", first)
 	}
@@ -98,7 +98,7 @@ func TestJSONLQuestionsFallsBackToFirstWhenNoLaterQuestion(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	first, last := jsonlQuestions(path, "claude")
+	first, last := defaultClient().jsonlQuestions(path, "claude")
 	if first != "only question" || last != "only question" {
 		t.Fatalf("first=%q last=%q", first, last)
 	}

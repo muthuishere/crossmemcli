@@ -14,12 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/muthuishere/crossmemcli/internal/diag"
-
 	_ "modernc.org/sqlite"
 )
 
-func ListSessions(opts ListOptions) ([]Session, error) {
+func (c *Client) listSessions(opts ListOptions) ([]Session, error) {
 	if opts.Provider == "" {
 		opts.Provider = "all"
 	}
@@ -35,38 +33,44 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 	// The SQLite providers limit in the query, but sessions are dropped after
 	// that — the caller's own live session, and anything outside the folder. Ask
 	// for enough extra rows that filtering cannot starve the requested page.
-	queryLimit := opts.Limit + len(currentSessionIDs())
+	queryLimit := opts.Limit + len(c.currentIDs)
 
 	var sessions []Session
 	if opts.Provider == "all" || opts.Provider == "devin" {
-		devin, err := listDevin(queryLimit, opts.CWD)
+		devin, err := c.listDevin(queryLimit, opts.CWD)
 		if err == nil {
 			sessions = append(sessions, devin...)
 		} else {
-			diag.Debugf("list devin err=%q", err)
+			c.log.debugf("list devin err=%q", err)
 		}
 	}
 	if opts.Provider == "all" || opts.Provider == "opencode" {
-		opencode, err := listOpenCode(queryLimit, opts.CWD)
+		opencode, err := c.listOpenCode(queryLimit, opts.CWD, opts.IncludeSubagents)
 		if err == nil {
 			sessions = append(sessions, opencode...)
 		} else {
-			diag.Debugf("list opencode err=%q", err)
+			c.log.debugf("list opencode err=%q", err)
 		}
 	}
 	if opts.Provider == "all" || opts.Provider == "copilot-cli" {
-		copilotCLI, err := listCopilotCLI(queryLimit, opts.CWD)
+		copilotCLI, err := c.listCopilotCLI(queryLimit, opts.CWD)
 		if err == nil {
 			sessions = append(sessions, copilotCLI...)
 		} else {
-			diag.Debugf("list copilot-cli err=%q", err)
+			c.log.debugf("list copilot-cli err=%q", err)
 		}
 	}
 
-	for _, root := range providerRoots(opts.Provider) {
-		jsonl, err := listJSONL(root.Path, root.Provider)
+	if err := c.canceled(); err != nil {
+		return nil, err
+	}
+	for _, root := range c.providerRoots(opts.Provider) {
+		jsonl, err := c.listJSONL(root.Path, root.Provider)
+		if cerr := c.canceled(); cerr != nil {
+			return nil, cerr
+		}
 		if err != nil {
-			diag.Debugf("list jsonl root=%q provider=%s err=%q", root.Path, root.Provider, err)
+			c.log.debugf("list jsonl root=%q provider=%s err=%q", root.Path, root.Provider, err)
 			continue
 		}
 		if opts.CWD != "" {
@@ -83,12 +87,12 @@ func ListSessions(opts ListOptions) ([]Session, error) {
 		}
 		return sessions[i].Modified.After(sessions[j].Modified)
 	})
-	sessions = markCurrent(sessions, opts.IncludeCurrent)
+	sessions = c.markCurrent(sessions, opts.IncludeCurrent)
 	if len(sessions) > opts.Limit {
 		sessions = sessions[:opts.Limit]
 	}
 	if opts.Questions {
-		sessions = withQuestions(sessions)
+		sessions = c.withQuestions(sessions)
 	}
 	for i := range sessions {
 		sessions[i].Ago = relativeAgo(sessions[i].Modified)
@@ -109,7 +113,7 @@ func filterByCWD(sessions []Session, cwd string) []Session {
 	return filtered
 }
 
-func listJSONL(root string, provider string) ([]Session, error) {
+func (c *Client) listJSONL(root string, provider string) ([]Session, error) {
 	// First walk the tree (cheap) to collect candidate transcript files, then read
 	// each file's metadata (cwd + title) concurrently — that per-file read is the
 	// bottleneck when there are hundreds of transcripts.
@@ -119,9 +123,12 @@ func listJSONL(root string, provider string) ([]Session, error) {
 	}
 	var entries []entry
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if cerr := c.canceled(); cerr != nil {
+			return cerr
+		}
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
 			if err != nil {
-				diag.Debugf("list walk path=%q err=%q", path, err)
+				c.log.debugf("list walk path=%q err=%q", path, err)
 			}
 			return nil
 		}
@@ -134,6 +141,17 @@ func listJSONL(root string, provider string) ([]Session, error) {
 		info, err := d.Info()
 		if err != nil {
 			return nil
+		}
+		// A symlinked transcript lists as its target: sorted by the target's
+		// time, sized by the target, and skipped when the target is gone —
+		// otherwise List offers a session that Load cannot open.
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Stat(path)
+			if err != nil {
+				c.log.debugf("list skip dangling symlink path=%q err=%q", path, err)
+				return nil
+			}
+			info = target
 		}
 		entries = append(entries, entry{path: path, info: info})
 		return nil
@@ -148,12 +166,15 @@ func listJSONL(root string, provider string) ([]Session, error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			if c.canceled() != nil {
+				return
+			}
 			e := entries[i]
 			inferred := inferProvider(e.path, provider)
-			title, cwd := readJSONLMeta(e.path, inferred)
+			title, cwd := c.readJSONLMeta(e.path, inferred)
 			workspace := cwd
 			if workspace == "" {
-				workspace = inferWorkspace(e.path, inferred)
+				workspace = c.inferWorkspace(e.path, inferred)
 			}
 			base := filepath.Base(e.path)
 			sessions[i] = Session{
@@ -171,6 +192,9 @@ func listJSONL(root string, provider string) ([]Session, error) {
 		}(i)
 	}
 	wg.Wait()
+	if cerr := c.canceled(); cerr != nil {
+		return nil, cerr
+	}
 	return sessions, err
 }
 
@@ -178,18 +202,29 @@ func listJSONL(root string, provider string) ([]Session, error) {
 // working directory the session ran in. The cwd is the reliable key for
 // matching a session to a folder; the encoded store path is lossy when a real
 // folder name contains a dash (e.g. "crossmem-workspace").
-func readJSONLMeta(path string, provider string) (title string, cwd string) {
-	file, err := withRetry("open jsonl meta "+path, func() (*os.File, error) {
+// metaBufPool reuses the scanner buffer readJSONLMeta needs for every transcript
+// on every List. Allocating it fresh cost 64 KB per file per call — about 320 MB
+// of garbage for a 5,000-transcript store, which a long-lived embedding caller
+// pays on each listing. It is immutable scratch space, not shared state.
+var metaBufPool = sync.Pool{New: func() any {
+	b := make([]byte, 64*1024)
+	return &b
+}}
+
+func (c *Client) readJSONLMeta(path string, provider string) (title string, cwd string) {
+	file, err := withRetry(c.log, "open jsonl meta "+path, func() (*os.File, error) {
 		return os.Open(path)
 	})
 	if err != nil {
-		diag.Debugf("read meta path=%q provider=%s err=%q", path, provider, err)
+		c.log.debugf("read meta path=%q provider=%s err=%q", path, provider, err)
 		return "", ""
 	}
 	defer file.Close()
 
+	buf := metaBufPool.Get().(*[]byte)
+	defer metaBufPool.Put(buf)
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	scanner.Buffer(*buf, 4*1024*1024)
 	for i := 0; i < 60 && scanner.Scan(); i++ {
 		var obj map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &obj); err != nil {
@@ -229,12 +264,12 @@ func readJSONLMeta(path string, provider string) (title string, cwd string) {
 // ~/.local/share/devin/cli on Linux/macOS, %APPDATA%\devin\cli on Windows, or
 // wherever $DEVIN_DB_PATH / $DEVIN_HOME / the user config point it. Empty when
 // Devin is not installed here.
-func devinDB() string {
-	return storePath("devin", "sqlite-sessions")
+func (c *Client) devinDB() string {
+	return c.storePath("devin", "sqlite-sessions")
 }
 
-func listDevin(limit int, cwdFilter string) ([]Session, error) {
-	dbPath := devinDB()
+func (c *Client) listDevin(limit int, cwdFilter string) ([]Session, error) {
+	dbPath := c.devinDB()
 	if dbPath == "" {
 		return nil, nil
 	}
@@ -248,8 +283,9 @@ func listDevin(limit int, cwdFilter string) ([]Session, error) {
 	}
 	defer db.Close()
 
-	rows, err := withRetry("query devin sessions", func() (*sql.Rows, error) {
-		return db.Query(`select id, title, working_directory, backend_type, model, agent_mode, last_activity_at from sessions where hidden = 0 order by last_activity_at desc limit ?`, limit)
+	rows, err := withRetry(c.log, "query devin sessions", func() (*sql.Rows, error) {
+		query, args := listQuery(`select id, title, working_directory, backend_type, model, agent_mode, last_activity_at from sessions where hidden = 0 order by last_activity_at desc`, limit, cwdFilter)
+		return db.QueryContext(c.context(), query, args...)
 	})
 	if err != nil {
 		return nil, err
@@ -280,13 +316,19 @@ func listDevin(limit int, cwdFilter string) ([]Session, error) {
 			continue
 		}
 		sessions = append(sessions, session)
+		if len(sessions) >= limit {
+			break
+		}
+	}
+	if err := c.canceled(); err != nil {
+		return nil, err
 	}
 	return sessions, rows.Err()
 }
 
 // loadDevinSession fetches one Devin session by id for load --session devin:<id>.
-func loadDevinSession(id string) (Session, error) {
-	dbPath := devinDB()
+func (c *Client) loadDevinSession(id string) (Session, error) {
+	dbPath := c.devinDB()
 	if dbPath == "" {
 		return Session{}, fmt.Errorf("devin session %q: no Devin session store found on this machine", id)
 	}
@@ -357,7 +399,7 @@ func isCopilotSessionPath(path string) bool {
 	return strings.Contains(slashed, "/chatSessions/") || strings.Contains(slashed, "/GitHub.copilot-chat/transcripts/")
 }
 
-func inferWorkspace(path string, provider string) string {
+func (c *Client) inferWorkspace(path string, provider string) string {
 	// Keyed on the store's shape first: every VS Code fork records the real
 	// folder in workspaceStorage/<id>/workspace.json, whoever ships it.
 	if isWorkspaceStoragePath(path) {
@@ -373,7 +415,7 @@ func inferWorkspace(path string, provider string) string {
 	case "claude":
 		return decodeClaudeDir(filepath.Base(filepath.Dir(path)))
 	case "codex":
-		root := storePath("codex", "jsonl-sessions")
+		root := c.storePath("codex", "jsonl-sessions")
 		if root == "" {
 			root = expandPath("~/.codex/sessions")
 		}

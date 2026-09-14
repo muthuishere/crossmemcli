@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"time"
-
-	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
 // The GitHub Copilot CLI (distinct from the VS Code Copilot chat store) keeps its
@@ -14,8 +12,8 @@ import (
 // (cwd = working dir, summary = title) and a denormalized `turns` table with one
 // user_message / assistant_response pair per row. The sibling auth.db and the
 // config/* state files are never read.
-func openCopilotCLIDB() (*sql.DB, os.FileInfo, string, error) {
-	dbPath := storePath("copilot-cli", "sqlite-sessions")
+func (c *Client) openCopilotCLIDB() (*sql.DB, os.FileInfo, string, error) {
+	dbPath := c.storePath("copilot-cli", "sqlite-sessions")
 	if dbPath == "" {
 		return nil, nil, "", os.ErrNotExist
 	}
@@ -30,15 +28,16 @@ func openCopilotCLIDB() (*sql.DB, os.FileInfo, string, error) {
 	return db, info, dbPath, nil
 }
 
-func listCopilotCLI(limit int, cwdFilter string) ([]Session, error) {
-	db, info, dbPath, err := openCopilotCLIDB()
+func (c *Client) listCopilotCLI(limit int, cwdFilter string) ([]Session, error) {
+	db, info, dbPath, err := c.openCopilotCLIDB()
 	if err != nil {
 		return nil, nil
 	}
 	defer db.Close()
 
-	rows, err := withRetry("query copilot-cli sessions", func() (*sql.Rows, error) {
-		return db.Query(`select id, cwd, summary, updated_at from sessions order by updated_at desc limit ?`, limit)
+	rows, err := withRetry(c.log, "query copilot-cli sessions", func() (*sql.Rows, error) {
+		query, args := listQuery(`select id, cwd, summary, updated_at from sessions order by updated_at desc`, limit, cwdFilter)
+		return db.QueryContext(c.context(), query, args...)
 	})
 	if err != nil {
 		return nil, err
@@ -67,12 +66,18 @@ func listCopilotCLI(limit int, cwdFilter string) ([]Session, error) {
 			continue
 		}
 		sessions = append(sessions, session)
+		if len(sessions) >= limit {
+			break
+		}
+	}
+	if err := c.canceled(); err != nil {
+		return nil, err
 	}
 	return sessions, rows.Err()
 }
 
-func loadCopilotCLISession(id string) (Session, error) {
-	db, info, dbPath, err := openCopilotCLIDB()
+func (c *Client) loadCopilotCLISession(id string) (Session, error) {
+	db, info, dbPath, err := c.openCopilotCLIDB()
 	if err != nil {
 		return Session{}, err
 	}
@@ -95,22 +100,22 @@ func loadCopilotCLISession(id string) (Session, error) {
 	}, nil
 }
 
-func copilotCLIPreview(sessionID string, maxChars int) string {
+func (c *Client) copilotCLIPreview(sessionID string, maxChars int) string {
 	if sessionID == "" {
 		return ""
 	}
-	db, _, _, err := openCopilotCLIDB()
+	db, _, _, err := c.openCopilotCLIDB()
 	if err != nil {
-		diag.Debugf("copilot-cli preview open err=%q", err)
+		c.log.debugf("copilot-cli preview open err=%q", err)
 		return ""
 	}
 	defer db.Close()
 
-	rows, err := withRetry("query copilot-cli preview", func() (*sql.Rows, error) {
+	rows, err := withRetry(c.log, "query copilot-cli preview", func() (*sql.Rows, error) {
 		return db.Query(`select user_message, assistant_response from turns where session_id = ? order by turn_index limit 400`, sessionID)
 	})
 	if err != nil {
-		diag.Debugf("copilot-cli preview query session=%q err=%q", sessionID, err)
+		c.log.debugf("copilot-cli preview query session=%q err=%q", sessionID, err)
 		return ""
 	}
 	defer rows.Close()

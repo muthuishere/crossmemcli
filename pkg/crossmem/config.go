@@ -6,9 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"sync"
-
-	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
 // Config is the optional user override file. crossmem ships a candidate list
@@ -76,6 +73,8 @@ type Defaults struct {
 	Limit int `json:"limit,omitempty"`
 }
 
+// Bundle excerpt sizes, as named in the config file's defaults.mode and by
+// `crossmem load --mode`.
 const (
 	ModeSummary = "summary"
 	ModeFull    = "full"
@@ -233,39 +232,6 @@ func lookupStore(section map[string][]string, def storeDefinition) ([]string, bo
 	return nil, false
 }
 
-var (
-	configMu     sync.Mutex
-	configLoaded bool
-	configCached Config
-)
-
-// userConfig returns the process-wide config, read once. A broken config must
-// not take the whole CLI down — it is reported to the debug log and ignored,
-// leaving the built-in candidates in force. `crossmem config` surfaces the
-// error properly.
-func userConfig() Config {
-	configMu.Lock()
-	defer configMu.Unlock()
-	if !configLoaded {
-		config, err := LoadConfig()
-		if err != nil {
-			diag.Debugf("config load err=%q", err)
-			config = Config{Path: config.Path, Exists: config.Exists}
-		}
-		configCached = config
-		configLoaded = true
-	}
-	return configCached
-}
-
-// resetConfig drops the cached config so the next read picks the file up again.
-func resetConfig() {
-	configMu.Lock()
-	configLoaded = false
-	configCached = Config{}
-	configMu.Unlock()
-}
-
 // StoreCandidate reports the effective candidate paths for one store and which
 // of them exist, for `crossmem config`.
 type StoreCandidate struct {
@@ -276,17 +242,17 @@ type StoreCandidate struct {
 	Resolved []string `json:"resolved"`
 }
 
-// EffectiveStores describes how every store resolves on this machine, after
+// effectiveStores describes how every store resolves on this machine, after
 // the user config is applied.
-func EffectiveStores() []StoreCandidate {
+func (c *Client) effectiveStores() []StoreCandidate {
 	out := make([]StoreCandidate, 0, len(storeDefinitions))
 	for _, def := range storeDefinitions {
 		out = append(out, StoreCandidate{
 			Provider: def.Provider,
 			Kind:     def.Kind,
 			Key:      def.Provider + ":" + def.Kind,
-			Sources:  userConfig().candidatesFor(def),
-			Resolved: storePaths(def.Provider, def.Kind),
+			Sources:  c.config.candidatesFor(def),
+			Resolved: c.storePaths(def.Provider, def.Kind),
 		})
 	}
 	return out
@@ -294,8 +260,8 @@ func EffectiveStores() []StoreCandidate {
 
 // configTemplate keeps its guidance in a top-level "readme" key, which the
 // parser ignores, so the file stays valid JSON and passes validation as-is.
-// UserDefaults exposes the configured defaults to the CLI layer.
-func UserDefaults() Defaults { return userConfig().Defaults }
+// userDefaults exposes the configured defaults to the CLI layer.
+func (c *Client) userDefaults() Defaults { return c.config.Defaults }
 
 const configTemplate = `{
   "readme": [

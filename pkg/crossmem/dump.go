@@ -11,8 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
 // DumpSchema identifies the portable dump format. A dump is a directory with a
@@ -21,11 +19,11 @@ import (
 // clean break instead of a silent misread.
 const DumpSchema = "crossmem.dump.v1"
 
-// DefaultDumpDir is where whole-machine `crossmem export` writes qa.jsonl, and
+// defaultDumpDir is where whole-machine `crossmem export` writes qa.jsonl, and
 // where `crossmem sync` pushes a store dump from, when neither a flag nor the
 // config says otherwise.
-func DefaultDumpDir() string {
-	if configured := userConfig().DumpDir; configured != "" {
+func (c *Client) defaultDumpDir() string {
+	if configured := c.config.DumpDir; configured != "" {
 		return expandPath(configured)
 	}
 	return filepath.Join(homeDir(), ".assets", "convdump")
@@ -75,24 +73,24 @@ type DumpManifest struct {
 
 // ExportOptions configures ExportDump.
 type ExportOptions struct {
-	// Out is the dump directory. Empty means DefaultDumpDir().
+	// Out is the dump directory. Empty means c.defaultDumpDir().
 	Out string
 	// Provider restricts the exported stores to one provider ("all" for every
 	// provider). Instructions and memory are always included.
 	Provider string
 }
 
-// ExportDump copies every discoverable store plus the well-known instruction
+// exportDump copies every discoverable store plus the well-known instruction
 // and memory files into a single portable dump directory and writes
 // manifest.json. It never copies credential files, auth databases, env files,
 // or anything under a vault/, cache/, or node_modules/ directory.
-func ExportDump(opts ExportOptions) (DumpManifest, error) {
+func (c *Client) exportDump(opts ExportOptions) (DumpManifest, error) {
 	if opts.Provider == "" {
 		opts.Provider = "all"
 	}
 	out := opts.Out
 	if out == "" {
-		out = DefaultDumpDir()
+		out = c.defaultDumpDir()
 	}
 	out = expandPath(out)
 	if err := os.MkdirAll(out, 0o755); err != nil {
@@ -109,7 +107,7 @@ func ExportDump(opts ExportOptions) (DumpManifest, error) {
 		Out:         out,
 	}
 
-	stores, err := DiscoverStores()
+	stores, err := c.discoverStores()
 	if err != nil {
 		return DumpManifest{}, err
 	}
@@ -121,12 +119,12 @@ func ExportDump(opts ExportOptions) (DumpManifest, error) {
 			continue
 		}
 		if isWithin(out, store.Path) {
-			diag.Debugf("export skip provider=%s kind=%s path=%q inside dump dir", store.Provider, store.Kind, store.Path)
+			c.log.debugf("export skip provider=%s kind=%s path=%q inside dump dir", store.Provider, store.Kind, store.Path)
 			continue
 		}
 		info, err := os.Stat(store.Path)
 		if err != nil {
-			diag.Debugf("export stat provider=%s kind=%s path=%q err=%q", store.Provider, store.Kind, store.Path, err)
+			c.log.debugf("export stat provider=%s kind=%s path=%q err=%q", store.Provider, store.Kind, store.Path, err)
 			continue
 		}
 		ds := DumpStore{
@@ -139,10 +137,10 @@ func ExportDump(opts ExportOptions) (DumpManifest, error) {
 		destAbs := filepath.Join(out, filepath.FromSlash(ds.Destination))
 		if info.IsDir() {
 			ds.RootKind = "dir"
-			ds.Files, ds.Bytes, err = copyStoreDir(store.Path, destAbs)
+			ds.Files, ds.Bytes, err = c.copyStoreDir(store.Path, destAbs)
 		} else {
 			ds.RootKind = "file"
-			ds.Files, ds.Bytes, err = copyStoreFile(store.Path, destAbs)
+			ds.Files, ds.Bytes, err = c.copyStoreFile(store.Path, destAbs)
 		}
 		if err != nil {
 			return DumpManifest{}, fmt.Errorf("export %s:%s: %w", store.Provider, store.Kind, err)
@@ -156,7 +154,7 @@ func ExportDump(opts ExportOptions) (DumpManifest, error) {
 			continue
 		}
 		destination := extra.Section + "/" + extra.Name
-		if err := copyFile(source, filepath.Join(out, filepath.FromSlash(destination))); err != nil {
+		if err := c.copyFile(source, filepath.Join(out, filepath.FromSlash(destination))); err != nil {
 			return DumpManifest{}, fmt.Errorf("export %s: %w", extra.Name, err)
 		}
 		entry := DumpFile{Name: extra.Name, Source: source, Destination: destination}
@@ -193,11 +191,11 @@ type ImportResult struct {
 	Missing []string
 }
 
-// ImportDump restores a dump directory back into this machine's stores. Each
+// importDump restores a dump directory back into this machine's stores. Each
 // store resolves to the current machine's location (honouring the user
 // config), so a dump made on another machine restores into the right place
 // here. Identical files are skipped unless Force is set.
-func ImportDump(opts ImportOptions) (ImportResult, error) {
+func (c *Client) importDump(opts ImportOptions) (ImportResult, error) {
 	in := expandPath(opts.In)
 	manifest, err := readManifest(filepath.Join(in, "manifest.json"))
 	if err != nil {
@@ -206,7 +204,7 @@ func ImportDump(opts ImportOptions) (ImportResult, error) {
 
 	var res ImportResult
 	for _, store := range manifest.Stores {
-		target := importTarget(store.Provider, store.Kind)
+		target := c.importTarget(store.Provider, store.Kind)
 		if target == "" {
 			res.Missing = append(res.Missing, fmt.Sprintf("%s:%s (from %s) — no location on this machine", store.Provider, store.Kind, store.Source))
 			continue
@@ -230,7 +228,7 @@ func ImportDump(opts ImportOptions) (ImportResult, error) {
 					continue
 				}
 				dest := filepath.Join(baseDir, entry.Name())
-				if err := restoreOne(filepath.Join(srcDir, entry.Name()), dest, opts, &res); err != nil {
+				if err := c.restoreOne(filepath.Join(srcDir, entry.Name()), dest, opts, &res); err != nil {
 					return res, err
 				}
 			}
@@ -250,7 +248,7 @@ func ImportDump(opts ImportOptions) (ImportResult, error) {
 			if err != nil {
 				return err
 			}
-			return restoreOne(path, filepath.Join(target, rel), opts, &res)
+			return c.restoreOne(path, filepath.Join(target, rel), opts, &res)
 		})
 		if err != nil {
 			return res, err
@@ -270,7 +268,7 @@ func ImportDump(opts ImportOptions) (ImportResult, error) {
 				continue
 			}
 			src := filepath.Join(in, filepath.FromSlash(entry.Destination))
-			if err := restoreOne(src, dest, opts, &res); err != nil {
+			if err := c.restoreOne(src, dest, opts, &res); err != nil {
 				return res, err
 			}
 		}
@@ -278,8 +276,8 @@ func ImportDump(opts ImportOptions) (ImportResult, error) {
 	return res, nil
 }
 
-func restoreOne(src string, dest string, opts ImportOptions, res *ImportResult) error {
-	restored, err := restoreFile(src, dest, opts.DryRun, opts.Force)
+func (c *Client) restoreOne(src string, dest string, opts ImportOptions, res *ImportResult) error {
+	restored, err := c.restoreFile(src, dest, opts.DryRun, opts.Force)
 	if err != nil {
 		return err
 	}
@@ -301,7 +299,7 @@ type SyncOptions struct {
 	// Prune deletes files at the destination that are not in the source
 	// (rclone sync) instead of additive copy.
 	Prune bool
-	// Out is the local dump directory. Empty means DefaultDumpDir().
+	// Out is the local dump directory. Empty means c.defaultDumpDir().
 	Out string
 }
 
@@ -315,20 +313,20 @@ type SyncResult struct {
 	Output string
 }
 
-// SyncDump pushes the dump directory to (or pulls it from) an rclone remote.
+// syncDump pushes the dump directory to (or pulls it from) an rclone remote.
 // The dump is a directory, so the same layout that import reads is what gets
 // synced; no archive step is needed.
-func SyncDump(opts SyncOptions) (SyncResult, error) {
+func (c *Client) syncDump(opts SyncOptions) (SyncResult, error) {
 	remote := opts.Remote
 	if remote == "" {
-		remote = userConfig().Sync.Remote
+		remote = c.config.Sync.Remote
 	}
 	if remote == "" {
 		return SyncResult{}, fmt.Errorf("no sync remote: pass --remote or set sync.remote in the config")
 	}
 	dumpDir := opts.Out
 	if dumpDir == "" {
-		dumpDir = DefaultDumpDir()
+		dumpDir = c.defaultDumpDir()
 	}
 	dumpDir = expandPath(dumpDir)
 	if !opts.Pull {
@@ -351,7 +349,7 @@ func SyncDump(opts SyncOptions) (SyncResult, error) {
 		source, destination = remote, dumpDir
 	}
 	args := []string{verb, source, destination, "--stats-one-line", "-v"}
-	diag.Debugf("sync rclone=%s args=%q", rclone, args)
+	c.log.debugf("sync rclone=%s args=%q", rclone, args)
 	cmd := exec.Command(rclone, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -409,19 +407,19 @@ func extraTarget(name string) string {
 // importTarget is the machine-local path a dumped store restores into: the
 // existing store location when the tool is installed, else the platform's
 // default candidate (so a fresh machine still gets the files).
-func importTarget(provider string, kind string) string {
-	if path := storePath(provider, kind); path != "" {
+func (c *Client) importTarget(provider string, kind string) string {
+	if path := c.storePath(provider, kind); path != "" {
 		return path
 	}
-	return displayCandidate(provider, kind)
+	return c.displayCandidate(provider, kind)
 }
 
-func copyStoreDir(root string, dest string) (int, int64, error) {
+func (c *Client) copyStoreDir(root string, dest string) (int, int64, error) {
 	var files int
 	var bytes int64
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			diag.Debugf("export walk path=%q err=%q", path, err)
+			c.log.debugf("export walk path=%q err=%q", path, err)
 			return nil
 		}
 		if d.IsDir() {
@@ -437,7 +435,7 @@ func copyStoreDir(root string, dest string) (int, int64, error) {
 		if !exportableFile(d.Name(), filepath.ToSlash(rel)) {
 			return nil
 		}
-		if err := copyFile(path, filepath.Join(dest, rel)); err != nil {
+		if err := c.copyFile(path, filepath.Join(dest, rel)); err != nil {
 			return err
 		}
 		if info, err := d.Info(); err == nil {
@@ -449,11 +447,11 @@ func copyStoreDir(root string, dest string) (int, int64, error) {
 	return files, bytes, err
 }
 
-func copyStoreFile(src string, destDir string) (int, int64, error) {
+func (c *Client) copyStoreFile(src string, destDir string) (int, int64, error) {
 	if skipExportFile(filepath.Base(src)) {
 		return 0, 0, nil
 	}
-	if err := copyFile(src, filepath.Join(destDir, filepath.Base(src))); err != nil {
+	if err := c.copyFile(src, filepath.Join(destDir, filepath.Base(src))); err != nil {
 		return 0, 0, err
 	}
 	info, err := os.Stat(src)
@@ -538,15 +536,13 @@ func isWithin(root string, path string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// copyFile copies a regular file, refusing symlinks so a dump never follows a
-// link outside its store.
-func copyFile(src string, dest string) error {
+func (c *Client) copyFile(src string, dest string) error {
 	info, err := os.Lstat(src)
 	if err != nil {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		diag.Debugf("export skip symlink %q", src)
+		c.log.debugf("export skip symlink %q", src)
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -570,7 +566,7 @@ func copyFile(src string, dest string) error {
 
 // restoreFile copies src to dest unless the bytes already match. It reports
 // whether it would/has restore the file (false = skipped as identical).
-func restoreFile(src string, dest string, dryRun bool, force bool) (bool, error) {
+func (c *Client) restoreFile(src string, dest string, dryRun bool, force bool) (bool, error) {
 	if !force {
 		want, err := os.ReadFile(src)
 		if err != nil {
@@ -583,7 +579,7 @@ func restoreFile(src string, dest string, dryRun bool, force bool) (bool, error)
 	if dryRun {
 		return true, nil
 	}
-	if err := copyFile(src, dest); err != nil {
+	if err := c.copyFile(src, dest); err != nil {
 		return false, err
 	}
 	return true, nil

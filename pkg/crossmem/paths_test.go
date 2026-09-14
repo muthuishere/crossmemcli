@@ -44,7 +44,7 @@ func TestExpandPathResolvesHome(t *testing.T) {
 // one the CLI ships to (the path changed from %APPDATA%\devin\cli) must be
 // present.
 func TestDevinCandidatesCoverWindows(t *testing.T) {
-	candidates := storeCandidates("devin", "sqlite-sessions")
+	candidates := defaultClient().storeCandidates("devin", "sqlite-sessions")
 	wantAny := []string{
 		"~/.local/share/devin/cli/sessions.db",
 		"%APPDATA%/devin/cli/sessions.db",
@@ -79,14 +79,14 @@ func TestDevinDBHonorsEnvOverrides(t *testing.T) {
 	resetConfigForTest(t)
 
 	t.Setenv("DEVIN_HOME", home)
-	if got := devinDB(); got != filepath.Join(home, "cli", "sessions.db") {
-		t.Fatalf("DEVIN_HOME not honored: devinDB() = %q, want %q", got, filepath.Join(home, "cli", "sessions.db"))
+	if got := defaultClient().devinDB(); got != filepath.Join(home, "cli", "sessions.db") {
+		t.Fatalf("DEVIN_HOME not honored: defaultClient().devinDB() = %q, want %q", got, filepath.Join(home, "cli", "sessions.db"))
 	}
 	// A direct DB path wins over the home-derived default; DEVIN_DB_PATH is
 	// listed before the DEVIN_HOME-derived candidates.
 	t.Setenv("DEVIN_DB_PATH", dbPath)
-	if got := devinDB(); got != dbPath {
-		t.Fatalf("DEVIN_DB_PATH not honored: devinDB() = %q, want %q", got, dbPath)
+	if got := defaultClient().devinDB(); got != dbPath {
+		t.Fatalf("DEVIN_DB_PATH not honored: defaultClient().devinDB() = %q, want %q", got, dbPath)
 	}
 }
 
@@ -100,7 +100,7 @@ func TestStorePathsFindsExistingAndGlobs(t *testing.T) {
 	t.Setenv("CROSSMEM_CONFIG", writeConfig(t, `{"stores":{"opencode":"`+filepath.ToSlash(dir)+`/opencode*.db"}}`))
 	resetConfigForTest(t)
 
-	got := storePaths("opencode", "sqlite-sessions")
+	got := defaultClient().storePaths("opencode", "sqlite-sessions")
 	if len(got) != 2 {
 		t.Fatalf("expected the two opencode*.db files, got %v", got)
 	}
@@ -172,12 +172,12 @@ func TestDevinIsTheOnlySessionSource(t *testing.T) {
 // Each walkable root carries the provider that owns it, so two forks sharing
 // the workspaceStorage shape stay distinguishable.
 func TestProviderRootsAreLabelled(t *testing.T) {
-	for _, root := range providerRoots("all") {
+	for _, root := range defaultClient().providerRoots("all") {
 		if root.Provider == "" || root.Path == "" {
 			t.Fatalf("unlabelled root: %+v", root)
 		}
 	}
-	for _, root := range providerRoots("claude") {
+	for _, root := range defaultClient().providerRoots("claude") {
 		if root.Provider != "claude" {
 			t.Fatalf("--provider claude returned a %s root", root.Provider)
 		}
@@ -192,7 +192,7 @@ func TestConfigDirEnvVarsWin(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CODEX_HOME", dir)
-	if got := storePath("codex", "jsonl-sessions"); got != filepath.Join(dir, "sessions") {
+	if got := defaultClient().storePath("codex", "jsonl-sessions"); got != filepath.Join(dir, "sessions") {
 		t.Fatalf("storePath = %q, want the $CODEX_HOME sessions dir", got)
 	}
 }

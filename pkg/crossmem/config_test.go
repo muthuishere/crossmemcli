@@ -97,8 +97,8 @@ func TestConfigOverrideRepointsDevinStore(t *testing.T) {
 	t.Setenv("CROSSMEM_CONFIG", writeConfig(t, `{"stores":{"devin:sqlite-sessions":"`+filepath.ToSlash(db)+`"}}`))
 	resetConfigForTest(t)
 
-	if got := devinDB(); got != db {
-		t.Fatalf("devinDB() = %q, want %q", got, db)
+	if got := defaultClient().devinDB(); got != db {
+		t.Fatalf("defaultClient().devinDB() = %q, want %q", got, db)
 	}
 }
 

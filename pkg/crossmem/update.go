@@ -21,6 +21,7 @@ func storeManifest(stores []Store) []Store {
 	return out
 }
 
+// UpdateResult reports what UpdateContext wrote under .crossmem/.
 type UpdateResult struct {
 	// Paths is every file the bundle covers, sorted.
 	Paths []string
@@ -30,11 +31,11 @@ type UpdateResult struct {
 	Unchanged []string
 }
 
-// UpdateContext writes the durable bundle under <folder>/.crossmem. It is
+// updateContext writes the durable bundle under <folder>/.crossmem. It is
 // idempotent: the rendered content carries no timestamps, and a file whose
 // bytes are unchanged is left alone rather than rewritten, so re-running it
 // produces no diff and no mtime churn.
-func UpdateContext(opts ListOptions) (UpdateResult, error) {
+func (c *Client) updateContext(opts ListOptions) (UpdateResult, error) {
 	opts.Deterministic = true
 	root, err := filepath.Abs(expandHome(opts.CWD))
 	if err != nil {
@@ -53,15 +54,15 @@ func UpdateContext(opts ListOptions) (UpdateResult, error) {
 	if err != nil {
 		return UpdateResult{}, err
 	}
-	context, err := BuildContext(opts)
+	context, err := c.buildContext(opts)
 	if err != nil {
 		return UpdateResult{}, err
 	}
-	sessions, err := ListSessions(opts)
+	sessions, err := c.listSessions(opts)
 	if err != nil {
 		return UpdateResult{}, err
 	}
-	stores, err := DiscoverStores()
+	stores, err := c.discoverStores()
 	if err != nil {
 		return UpdateResult{}, err
 	}

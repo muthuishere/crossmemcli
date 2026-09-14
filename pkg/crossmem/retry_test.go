@@ -7,7 +7,7 @@ import (
 
 func TestWithRetryRetriesTransientErrors(t *testing.T) {
 	attempts := 0
-	value, err := withRetry("test transient", func() (string, error) {
+	value, err := withRetry(nil, "test transient", func() (string, error) {
 		attempts++
 		if attempts < 2 {
 			return "", errors.New("database is locked")
@@ -27,7 +27,7 @@ func TestWithRetryRetriesTransientErrors(t *testing.T) {
 
 func TestWithRetryDoesNotRetryPermanentErrors(t *testing.T) {
 	attempts := 0
-	_, err := withRetry("test permanent", func() (string, error) {
+	_, err := withRetry(nil, "test permanent", func() (string, error) {
 		attempts++
 		return "", errors.New("permission denied")
 	})

@@ -8,8 +8,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-
-	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
 // A title says what a session was called; the first and last thing actually
@@ -25,7 +23,7 @@ const (
 // withQuestions fills FirstQuestion/LastQuestion for the sessions that will
 // actually be shown. It runs after limiting, so the cost is bounded by the
 // page size rather than by how many sessions exist.
-func withQuestions(sessions []Session) []Session {
+func (c *Client) withQuestions(sessions []Session) []Session {
 	sem := make(chan struct{}, previewWorkers)
 	var wg sync.WaitGroup
 	for i := range sessions {
@@ -34,7 +32,7 @@ func withQuestions(sessions []Session) []Session {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			first, last := sessionQuestions(sessions[i])
+			first, last := c.sessionQuestions(sessions[i])
 			sessions[i].FirstQuestion = truncate(first, questionChars)
 			sessions[i].LastQuestion = truncate(last, questionChars)
 		}(i)
@@ -43,16 +41,16 @@ func withQuestions(sessions []Session) []Session {
 	return sessions
 }
 
-func sessionQuestions(session Session) (string, string) {
+func (c *Client) sessionQuestions(session Session) (string, string) {
 	switch session.Provider {
 	case "devin":
-		return devinQuestions(session.ID)
+		return c.devinQuestions(session.ID)
 	case "opencode":
-		return openCodeQuestions(session.ID)
+		return c.openCodeQuestions(session.ID)
 	case "copilot-cli":
-		return copilotCLIQuestions(session.ID)
+		return c.copilotCLIQuestions(session.ID)
 	default:
-		return jsonlQuestions(session.Path, session.Provider)
+		return c.jsonlQuestions(session.Path, session.Provider)
 	}
 }
 
@@ -60,12 +58,12 @@ func sessionQuestions(session Session) (string, string) {
 // only the tail for the closing one. Transcripts run to tens of megabytes, so
 // reading the whole file to find its last user line would make listing far
 // slower than the decision it informs is worth.
-func jsonlQuestions(path string, provider string) (string, string) {
-	file, err := withRetry("open jsonl questions "+path, func() (*os.File, error) {
+func (c *Client) jsonlQuestions(path string, provider string) (string, string) {
+	file, err := withRetry(c.log, "open jsonl questions "+path, func() (*os.File, error) {
 		return os.Open(path)
 	})
 	if err != nil {
-		diag.Debugf("questions open path=%q err=%q", path, err)
+		c.log.debugf("questions open path=%q err=%q", path, err)
 		return "", ""
 	}
 	defer file.Close()
@@ -144,21 +142,21 @@ func userTexts(line []byte, provider string) []string {
 	return texts
 }
 
-func devinQuestions(sessionID string) (string, string) {
-	return sqliteQuestions(devinDB(), sessionID,
+func (c *Client) devinQuestions(sessionID string) (string, string) {
+	return c.sqliteQuestions(c.devinDB(), sessionID,
 		`select json_extract(chat_message,'$.content') from message_nodes
 		   where session_id = ? and json_extract(chat_message,'$.role') = 'user'
 		   order by node_id`)
 }
 
-func copilotCLIQuestions(sessionID string) (string, string) {
-	return sqliteQuestions(storePath("copilot-cli", "sqlite-sessions"), sessionID,
+func (c *Client) copilotCLIQuestions(sessionID string) (string, string) {
+	return c.sqliteQuestions(c.storePath("copilot-cli", "sqlite-sessions"), sessionID,
 		`select user_message from turns where session_id = ? order by turn_index`)
 }
 
-func openCodeQuestions(sessionID string) (string, string) {
-	for _, dbPath := range openCodeDBs() {
-		first, last := sqliteQuestions(dbPath, sessionID,
+func (c *Client) openCodeQuestions(sessionID string) (string, string) {
+	for _, dbPath := range c.openCodeDBs() {
+		first, last := c.sqliteQuestions(dbPath, sessionID,
 			`select json_extract(p.data,'$.text') from part p join message m on m.id = p.message_id
 			   where p.session_id = ? and json_extract(m.data,'$.role') = 'user'
 			     and json_extract(p.data,'$.type') = 'text'
@@ -173,22 +171,22 @@ func openCodeQuestions(sessionID string) (string, string) {
 // sqliteQuestions runs one ordered query and keeps its first and last non-empty
 // row. The row counts here are small (turns in a session), so a single ordered
 // pass beats two queries with opposite sorts.
-func sqliteQuestions(dbPath string, sessionID string, query string) (string, string) {
+func (c *Client) sqliteQuestions(dbPath string, sessionID string, query string) (string, string) {
 	if dbPath == "" || sessionID == "" {
 		return "", ""
 	}
 	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(250)")
 	if err != nil {
-		diag.Debugf("questions open db=%q err=%q", dbPath, err)
+		c.log.debugf("questions open db=%q err=%q", dbPath, err)
 		return "", ""
 	}
 	defer db.Close()
 
-	rows, err := withRetry("query questions", func() (*sql.Rows, error) {
+	rows, err := withRetry(c.log, "query questions", func() (*sql.Rows, error) {
 		return db.Query(query, sessionID)
 	})
 	if err != nil {
-		diag.Debugf("questions query session=%q err=%q", sessionID, err)
+		c.log.debugf("questions query session=%q err=%q", sessionID, err)
 		return "", ""
 	}
 	defer rows.Close()

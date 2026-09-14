@@ -4,27 +4,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
-func DiscoverStores() ([]Store, error) {
+func (c *Client) discoverStores() ([]Store, error) {
 	stores := make([]Store, 0, len(storeDefinitions))
 	for _, def := range storeDefinitions {
 		// A store can resolve to several real paths (OpenCode's stable/dev/local
 		// databases), to exactly one, or to none when the tool is not installed.
 		// Report one line per real path, or a single line naming the location
 		// this platform would use.
-		paths := storePaths(def.Provider, def.Kind)
+		paths := c.storePaths(def.Provider, def.Kind)
 		if len(paths) == 0 {
-			stores = append(stores, Store{Provider: def.Provider, Kind: def.Kind, Path: displayCandidate(def.Provider, def.Kind), Exists: false, Note: def.Note})
+			stores = append(stores, Store{Provider: def.Provider, Kind: def.Kind, Path: c.displayCandidate(def.Provider, def.Kind), Exists: false, Note: def.Note})
 			continue
 		}
 		for _, path := range paths {
 			store := Store{Provider: def.Provider, Kind: def.Kind, Path: path, Exists: true, Note: def.Note}
 			info, err := os.Stat(path)
 			if err != nil {
-				diag.Debugf("scan stat provider=%s kind=%s path=%q err=%q", def.Provider, def.Kind, path, err)
+				c.log.debugf("scan stat provider=%s kind=%s path=%q err=%q", def.Provider, def.Kind, path, err)
 				store.Exists = false
 				stores = append(stores, store)
 				continue
@@ -32,7 +30,7 @@ func DiscoverStores() ([]Store, error) {
 			size := info.Size()
 			store.Bytes = &size
 			if info.IsDir() {
-				files, bytes := countInteresting(path)
+				files, bytes := c.countInteresting(path)
 				store.Files = &files
 				store.Bytes = &bytes
 			}
@@ -42,12 +40,12 @@ func DiscoverStores() ([]Store, error) {
 	return stores, nil
 }
 
-func countInteresting(root string) (int, int64) {
+func (c *Client) countInteresting(root string) (int, int64) {
 	var files int
 	var bytes int64
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			diag.Debugf("scan walk path=%q err=%q", path, err)
+			c.log.debugf("scan walk path=%q err=%q", path, err)
 			return nil
 		}
 		if d.IsDir() {

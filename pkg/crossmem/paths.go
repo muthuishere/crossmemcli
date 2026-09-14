@@ -162,12 +162,12 @@ func expandPath(path string) string {
 
 // storeCandidates returns the raw (unexpanded) path candidates for a store,
 // with any user config override applied.
-func storeCandidates(provider string, kind string) []string {
+func (c *Client) storeCandidates(provider string, kind string) []string {
 	def, ok := storeDefinitionFor(provider, kind)
 	if !ok {
 		return nil
 	}
-	return userConfig().candidatesFor(def)
+	return c.config.candidatesFor(def)
 }
 
 func storeDefinitionFor(provider string, kind string) (storeDefinition, bool) {
@@ -183,10 +183,10 @@ func storeDefinitionFor(provider string, kind string) (storeDefinition, bool) {
 // machine, in candidate order and deduplicated. Candidates containing glob
 // metacharacters are expanded (OpenCode ships opencode.db / opencode-dev.db /
 // opencode-local.db side by side).
-func storePaths(provider string, kind string) []string {
+func (c *Client) storePaths(provider string, kind string) []string {
 	var found []string
 	seen := map[string]bool{}
-	for _, candidate := range storeCandidates(provider, kind) {
+	for _, candidate := range c.storeCandidates(provider, kind) {
 		expanded := expandPath(candidate)
 		if expanded == "" {
 			continue
@@ -210,8 +210,8 @@ func storePaths(provider string, kind string) []string {
 
 // storePath returns the single best existing location for a store, or "" when
 // the tool is not installed here.
-func storePath(provider string, kind string) string {
-	paths := storePaths(provider, kind)
+func (c *Client) storePath(provider string, kind string) string {
+	paths := c.storePaths(provider, kind)
 	if len(paths) == 0 {
 		return ""
 	}
@@ -220,8 +220,8 @@ func storePath(provider string, kind string) string {
 
 // displayCandidate is the path shown by scan for a store with nothing on disk:
 // the first candidate that is meaningful on this platform.
-func displayCandidate(provider string, kind string) string {
-	candidates := storeCandidates(provider, kind)
+func (c *Client) displayCandidate(provider string, kind string) string {
+	candidates := c.storeCandidates(provider, kind)
 	for _, candidate := range candidates {
 		if expanded := expandPath(candidate); expanded != "" {
 			return expanded
@@ -242,7 +242,7 @@ type providerRoot struct {
 	Path     string
 }
 
-func providerRoots(provider string) []providerRoot {
+func (c *Client) providerRoots(provider string) []providerRoot {
 	roots := []providerRoot{}
 	for _, def := range storeDefinitions {
 		if provider != "all" && def.Provider != provider {
@@ -250,7 +250,7 @@ func providerRoots(provider string) []providerRoot {
 		}
 		switch def.Kind {
 		case "jsonl-projects", "jsonl-sessions", "vscode-workspace-storage":
-			for _, path := range storePaths(def.Provider, def.Kind) {
+			for _, path := range c.storePaths(def.Provider, def.Kind) {
 				roots = append(roots, providerRoot{Provider: def.Provider, Path: path})
 			}
 		}

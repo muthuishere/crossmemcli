@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-
-	"github.com/muthuishere/crossmemcli/internal/diag"
+	"strings"
 )
 
 // OpenCode (sst/opencode) keeps sessions in SQLite under its data directory —
@@ -14,35 +13,48 @@ import (
 // stable build writes opencode.db; dev/local builds use opencode-dev.db /
 // opencode-local.db. We read whichever exist (read-only) and never touch the
 // sibling auth.json / credential / account tables.
-func openCodeDBs() []string {
-	return storePaths("opencode", "sqlite-sessions")
+func (c *Client) openCodeDBs() []string {
+	return c.storePaths("opencode", "sqlite-sessions")
 }
 
-func listOpenCode(limit int, cwdFilter string) ([]Session, error) {
+func (c *Client) listOpenCode(limit int, cwdFilter string, includeSubagents bool) ([]Session, error) {
 	var sessions []Session
 	seen := map[string]bool{}
-	for _, dbPath := range openCodeDBs() {
+	for _, dbPath := range c.openCodeDBs() {
 		info, err := os.Stat(dbPath)
 		if err != nil {
 			continue
 		}
 		db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(250)")
 		if err != nil {
-			diag.Debugf("opencode open db=%q err=%q", dbPath, err)
+			c.log.debugf("opencode open db=%q err=%q", dbPath, err)
 			continue
 		}
-		rows, err := withRetry("query opencode sessions", func() (*sql.Rows, error) {
-			return db.Query(`select id, title, directory, time_updated from session order by time_updated desc limit ?`, limit)
+		// OpenCode runs subagents (@explore, @general) as child sessions. They
+		// are part of their parent's work, not sessions a user would resume,
+		// so they are hidden unless asked for and listed on the parent instead.
+		hasParent := c.hasColumn(db, "session", "parent_id")
+		base := `select id, title, directory, time_updated, '' from session`
+		if hasParent {
+			base = `select id, title, directory, time_updated, coalesce(parent_id, '') from session`
+			if !includeSubagents {
+				base += ` where parent_id is null`
+			}
+		}
+		query, args := listQuery(base+` order by time_updated desc`, limit, cwdFilter)
+		rows, err := withRetry(c.log, "query opencode sessions", func() (*sql.Rows, error) {
+			return db.QueryContext(c.context(), query, args...)
 		})
 		if err != nil {
 			db.Close()
-			diag.Debugf("opencode query db=%q err=%q", dbPath, err)
+			c.log.debugf("opencode query db=%q err=%q", dbPath, err)
 			continue
 		}
+		var found []Session
 		for rows.Next() {
-			var id, title, directory string
+			var id, title, directory, parent string
 			var updated int64
-			if err := rows.Scan(&id, &title, &directory, &updated); err != nil {
+			if err := rows.Scan(&id, &title, &directory, &updated, &parent); err != nil {
 				continue
 			}
 			if seen[id] {
@@ -59,20 +71,64 @@ func listOpenCode(limit int, cwdFilter string) ([]Session, error) {
 				Workspace: directory,
 				Title:     title,
 			}
+			if parent != "" {
+				session.Parent = "opencode:" + parent
+			}
 			if cwdFilter != "" && !sameOrChild(session.Workspace, cwdFilter) {
 				continue
 			}
-			sessions = append(sessions, session)
+			found = append(found, session)
+			if len(found) >= limit {
+				break
+			}
 		}
 		rows.Close()
+		if hasParent {
+			c.attachOpenCodeChildren(db, found)
+		}
+		sessions = append(sessions, found...)
 		db.Close()
+		if err := c.canceled(); err != nil {
+			return nil, err
+		}
 	}
 	return sessions, nil
 }
 
+// attachOpenCodeChildren fills Children on each listed session with the refs
+// of its subagent sessions, newest first.
+func (c *Client) attachOpenCodeChildren(db *sql.DB, sessions []Session) {
+	if len(sessions) == 0 {
+		return
+	}
+	index := make(map[string]int, len(sessions))
+	args := make([]any, 0, len(sessions))
+	marks := make([]string, 0, len(sessions))
+	for i, s := range sessions {
+		index[s.ID] = i
+		args = append(args, s.ID)
+		marks = append(marks, "?")
+	}
+	rows, err := db.QueryContext(c.context(), `select parent_id, id from session where parent_id in (`+strings.Join(marks, ",")+`) order by time_updated desc`, args...)
+	if err != nil {
+		c.log.debugf("opencode children err=%q", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var parent, id string
+		if rows.Scan(&parent, &id) != nil {
+			continue
+		}
+		if i, ok := index[parent]; ok {
+			sessions[i].Children = append(sessions[i].Children, "opencode:"+id)
+		}
+	}
+}
+
 // loadOpenCodeSession fetches one session by id for load --session opencode:<id>.
-func loadOpenCodeSession(id string) (Session, error) {
-	for _, dbPath := range openCodeDBs() {
+func (c *Client) loadOpenCodeSession(id string) (Session, error) {
+	for _, dbPath := range c.openCodeDBs() {
 		info, err := os.Stat(dbPath)
 		if err != nil {
 			continue
@@ -102,31 +158,31 @@ func loadOpenCodeSession(id string) (Session, error) {
 	return Session{}, fmt.Errorf("opencode session %q not found", id)
 }
 
-func openCodePreview(sessionID string, maxChars int) string {
+func (c *Client) openCodePreview(sessionID string, maxChars int) string {
 	if sessionID == "" {
 		return ""
 	}
-	for _, dbPath := range openCodeDBs() {
-		if text := openCodePreviewFromDB(dbPath, sessionID, maxChars); text != "" {
+	for _, dbPath := range c.openCodeDBs() {
+		if text := c.openCodePreviewFromDB(dbPath, sessionID, maxChars); text != "" {
 			return text
 		}
 	}
 	return ""
 }
 
-func openCodePreviewFromDB(dbPath string, sessionID string, maxChars int) string {
+func (c *Client) openCodePreviewFromDB(dbPath string, sessionID string, maxChars int) string {
 	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(250)")
 	if err != nil {
-		diag.Debugf("opencode preview open db=%q err=%q", dbPath, err)
+		c.log.debugf("opencode preview open db=%q err=%q", dbPath, err)
 		return ""
 	}
 	defer db.Close()
 
-	rows, err := withRetry("query opencode preview", func() (*sql.Rows, error) {
+	rows, err := withRetry(c.log, "query opencode preview", func() (*sql.Rows, error) {
 		return db.Query(`select m.data, p.data from part p join message m on m.id = p.message_id where p.session_id = ? order by m.time_created, p.time_created limit 4000`, sessionID)
 	})
 	if err != nil {
-		diag.Debugf("opencode preview query session=%q err=%q", sessionID, err)
+		c.log.debugf("opencode preview query session=%q err=%q", sessionID, err)
 		return ""
 	}
 	defer rows.Close()

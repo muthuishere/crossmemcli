@@ -9,9 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/muthuishere/crossmemcli/internal/skills"
 	"github.com/muthuishere/crossmemcli/internal/version"
 	"github.com/muthuishere/crossmemcli/pkg/crossmem"
+	"github.com/muthuishere/crossmemcli/pkg/skillinstall"
+	"github.com/muthuishere/crossmemcli/skills"
 )
 
 const helpText = `Usage: crossmem [options] [command]
@@ -85,6 +86,7 @@ Options:
   --folder <path>                         only show sessions whose working directory is this folder
   --limit <number>                        maximum sessions to print (default: 50)
   --include-current                       also show the session this process is running inside
+  --subagents                             also list subagent sessions as their own rows (hidden by default)
   --no-questions                          skip the first/last question lookup (faster)
   --json                                  print sessions as JSON
   -h, --help                              display help for command
@@ -701,6 +703,7 @@ func runList(args []string, stdout io.Writer) error {
 	limit := fs.Int("limit", 50, "limit")
 	jsonOut := fs.Bool("json", false, "print JSON")
 	includeCurrent := fs.Bool("include-current", false, "include the session this process is running inside")
+	subagents := fs.Bool("subagents", false, "also list subagent sessions as their own rows")
 	noQuestions := fs.Bool("no-questions", false, "skip the first/last question lookup")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -713,11 +716,12 @@ func runList(args []string, stdout io.Writer) error {
 	}
 	sp := startSpinner(os.Stderr, "Scanning sessions…")
 	sessions, err := crossmem.ListSessions(crossmem.ListOptions{
-		Provider:       *provider,
-		CWD:            cwd,
-		Limit:          resolveLimit(fs, limit, 50),
-		IncludeCurrent: *includeCurrent,
-		Questions:      !*noQuestions,
+		Provider:         *provider,
+		CWD:              cwd,
+		Limit:            resolveLimit(fs, limit, 50),
+		IncludeCurrent:   *includeCurrent,
+		Questions:        !*noQuestions,
+		IncludeSubagents: *subagents,
 	})
 	sp.Stop()
 	if err != nil {
@@ -886,7 +890,7 @@ func flagTakesValue(arg string) bool {
 		return false
 	}
 	switch name {
-	case "json", "full", "include-current", "no-questions", "merge",
+	case "json", "full", "include-current", "subagents", "no-questions", "merge",
 		"dry-run", "force", "prune", "pull", "skills", "agents", "help", "h",
 		"version", "V", "init":
 		return false
@@ -922,14 +926,15 @@ func runTopLevelSkillAction(verb string, args []string, stdout io.Writer, stderr
 
 func executeSkillAction(label string, agents bool, stdout io.Writer, stderr io.Writer) error {
 	includeAgents := resolveIncludeAgents(agents)
-	var (
-		results []skills.InstallResult
-		err     error
-	)
+	targets, err := skillinstall.DefaultTargets(includeAgents)
+	if err != nil {
+		return err
+	}
+	var results []skillinstall.Result
 	if strings.HasSuffix(label, "uninstall") {
-		results, err = skills.UninstallBundledSkill(skills.InstallOptions{IncludeAgents: includeAgents})
+		results, err = skillinstall.Uninstall(skills.Loader, targets)
 	} else {
-		results, err = skills.InstallBundledSkill(skills.InstallOptions{IncludeAgents: includeAgents})
+		results, err = skillinstall.Install(skills.FS, skills.Loader, targets)
 	}
 	if err != nil {
 		return err

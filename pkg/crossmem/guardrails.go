@@ -15,11 +15,14 @@ var repoGuardrailFiles = []string{
 	filepath.Join(".claude", "CLAUDE.md"),
 }
 
+// GuardrailFile is one repo instruction file an agent must follow.
 type GuardrailFile struct {
 	Path  string `json:"path"`
 	Bytes int64  `json:"bytes"`
 }
 
+// BuildGuardrails renders the instruction files for folder as the Markdown
+// block bundles embed.
 func BuildGuardrails(folder string) (string, error) {
 	files, err := ReadGuardrails(folder)
 	if err != nil {
@@ -42,6 +45,8 @@ func BuildGuardrails(folder string) (string, error) {
 	return strings.TrimSpace(b.String()) + "\n", nil
 }
 
+// ReadGuardrails finds AGENTS.md, CLAUDE.md, .agents/AGENTS.md, and
+// .claude/CLAUDE.md in folder.
 func ReadGuardrails(folder string) ([]GuardrailFile, error) {
 	root, err := filepath.Abs(expandHome(folder))
 	if err != nil {

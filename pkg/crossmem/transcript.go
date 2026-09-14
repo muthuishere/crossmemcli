@@ -7,8 +7,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/muthuishere/crossmemcli/internal/diag"
 )
 
 // event is one conversational turn. No provider, model, agent, or token fields.
@@ -19,29 +17,29 @@ type event struct {
 	at   time.Time
 }
 
-func sessionQA(session Session) []QARecord {
-	return qaPairs(sessionEvents(session), session)
+func (c *Client) sessionQA(session Session) []QARecord {
+	return qaPairs(c.sessionEvents(session), session)
 }
 
-func sessionEvents(session Session) []event {
+func (c *Client) sessionEvents(session Session) []event {
 	switch session.Provider {
 	case "devin":
-		return devinEvents(session.ID)
+		return c.devinEvents(session.ID)
 	case "opencode":
-		return openCodeEvents(session.ID)
+		return c.openCodeEvents(session.ID)
 	case "copilot-cli":
-		return copilotCLIEvents(session.ID)
+		return c.copilotCLIEvents(session.ID)
 	default:
-		return jsonlEvents(session.Path, session.Provider)
+		return c.jsonlEvents(session.Path, session.Provider)
 	}
 }
 
-func jsonlEvents(path string, provider string) []event {
-	data, err := withRetry("read jsonl events "+path, func() ([]byte, error) {
+func (c *Client) jsonlEvents(path string, provider string) []event {
+	data, err := withRetry(c.log, "read jsonl events "+path, func() ([]byte, error) {
 		return os.ReadFile(path)
 	})
 	if err != nil {
-		diag.Debugf("events read path=%q err=%q", path, err)
+		c.log.debugf("events read path=%q err=%q", path, err)
 		return nil
 	}
 	var events []event
@@ -423,25 +421,25 @@ func asList(value any) []any {
 	return []any{value}
 }
 
-func devinEvents(sessionID string) []event {
+func (c *Client) devinEvents(sessionID string) []event {
 	if sessionID == "" {
 		return nil
 	}
-	dbPath := devinDB()
+	dbPath := c.devinDB()
 	if dbPath == "" {
 		return nil
 	}
 	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(250)")
 	if err != nil {
-		diag.Debugf("devin events open err=%q", err)
+		c.log.debugf("devin events open err=%q", err)
 		return nil
 	}
 	defer db.Close()
-	rows, err := withRetry("query devin events", func() (*sql.Rows, error) {
+	rows, err := withRetry(c.log, "query devin events", func() (*sql.Rows, error) {
 		return db.Query(`select chat_message from message_nodes where session_id = ? order by node_id`, sessionID)
 	})
 	if err != nil {
-		diag.Debugf("devin events query session=%q err=%q", sessionID, err)
+		c.log.debugf("devin events query session=%q err=%q", sessionID, err)
 		return nil
 	}
 	defer rows.Close()
@@ -467,21 +465,21 @@ func devinEvents(sessionID string) []event {
 	return events
 }
 
-func copilotCLIEvents(sessionID string) []event {
+func (c *Client) copilotCLIEvents(sessionID string) []event {
 	if sessionID == "" {
 		return nil
 	}
-	db, _, _, err := openCopilotCLIDB()
+	db, _, _, err := c.openCopilotCLIDB()
 	if err != nil {
-		diag.Debugf("copilot-cli events open err=%q", err)
+		c.log.debugf("copilot-cli events open err=%q", err)
 		return nil
 	}
 	defer db.Close()
-	rows, err := withRetry("query copilot-cli events", func() (*sql.Rows, error) {
+	rows, err := withRetry(c.log, "query copilot-cli events", func() (*sql.Rows, error) {
 		return db.Query(`select user_message, assistant_response from turns where session_id = ? order by turn_index`, sessionID)
 	})
 	if err != nil {
-		diag.Debugf("copilot-cli events query session=%q err=%q", sessionID, err)
+		c.log.debugf("copilot-cli events query session=%q err=%q", sessionID, err)
 		return nil
 	}
 	defer rows.Close()
@@ -501,30 +499,30 @@ func copilotCLIEvents(sessionID string) []event {
 	return events
 }
 
-func openCodeEvents(sessionID string) []event {
+func (c *Client) openCodeEvents(sessionID string) []event {
 	if sessionID == "" {
 		return nil
 	}
-	for _, dbPath := range openCodeDBs() {
-		if events := openCodeEventsFromDB(dbPath, sessionID); len(events) > 0 {
+	for _, dbPath := range c.openCodeDBs() {
+		if events := c.openCodeEventsFromDB(dbPath, sessionID); len(events) > 0 {
 			return events
 		}
 	}
 	return nil
 }
 
-func openCodeEventsFromDB(dbPath string, sessionID string) []event {
+func (c *Client) openCodeEventsFromDB(dbPath string, sessionID string) []event {
 	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(250)")
 	if err != nil {
-		diag.Debugf("opencode events open db=%q err=%q", dbPath, err)
+		c.log.debugf("opencode events open db=%q err=%q", dbPath, err)
 		return nil
 	}
 	defer db.Close()
-	rows, err := withRetry("query opencode events", func() (*sql.Rows, error) {
+	rows, err := withRetry(c.log, "query opencode events", func() (*sql.Rows, error) {
 		return db.Query(`select m.data, p.data from part p join message m on m.id = p.message_id where p.session_id = ? order by m.time_created, p.time_created`, sessionID)
 	})
 	if err != nil {
-		diag.Debugf("opencode events query session=%q err=%q", sessionID, err)
+		c.log.debugf("opencode events query session=%q err=%q", sessionID, err)
 		return nil
 	}
 	defer rows.Close()
