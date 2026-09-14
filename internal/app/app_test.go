@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/muthuishere/crossmemcli/internal/providers"
+	"github.com/muthuishere/crossmemcli/pkg/crossmem"
 )
 
 func TestHelpCommand(t *testing.T) {
@@ -46,7 +46,7 @@ func TestSkillsSubcommandRemoved(t *testing.T) {
 // when a provider is added. Every provider the engine knows must appear in it.
 func TestProviderHelpListsEveryProvider(t *testing.T) {
 	for _, help := range map[string]string{"list": listHelpText, "load": loadHelpText, "update": updateHelpText, "export": exportHelpText} {
-		for _, provider := range providers.Providers() {
+		for _, provider := range crossmem.Providers() {
 			if !strings.Contains(help, provider) {
 				t.Fatalf("help text does not mention provider %q:\n%s", provider, help)
 			}

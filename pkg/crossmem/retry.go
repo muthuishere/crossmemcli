@@ -1,4 +1,4 @@
-package providers
+package crossmem
 
 import (
 	"errors"

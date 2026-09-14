@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/muthuishere/crossmemcli/internal/providers"
 	"github.com/muthuishere/crossmemcli/internal/skills"
 	"github.com/muthuishere/crossmemcli/internal/version"
+	"github.com/muthuishere/crossmemcli/pkg/crossmem"
 )
 
 const helpText = `Usage: crossmem [options] [command]
@@ -410,7 +410,7 @@ func runGuardrails(args []string, stdout io.Writer) error {
 	if len(args) > 0 {
 		folder = args[0]
 	}
-	text, err := providers.BuildGuardrails(folder)
+	text, err := crossmem.BuildGuardrails(folder)
 	if err != nil {
 		return err
 	}
@@ -429,7 +429,7 @@ func runUpdate(args []string, stdout io.Writer) error {
 	provider := fs.String("provider", "all", "provider")
 	limit := fs.Int("limit", 10, "limit")
 	full := fs.Bool("full", false, "write fuller per-session excerpts")
-	mode := fs.String("mode", providers.ModeSummary, "summary or full")
+	mode := fs.String("mode", crossmem.ModeSummary, "summary or full")
 	includeCurrent := fs.Bool("include-current", false, "include the session this process is running inside")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -437,7 +437,7 @@ func runUpdate(args []string, stdout io.Writer) error {
 	if cwd == "" {
 		cwd = "."
 	}
-	result, err := providers.UpdateContext(providers.ListOptions{
+	result, err := crossmem.UpdateContext(crossmem.ListOptions{
 		Provider:       *provider,
 		CWD:            cwd,
 		Limit:          resolveLimit(fs, limit, 10),
@@ -475,7 +475,7 @@ func runExport(args []string, stdout io.Writer) error {
 		positional = fs.Arg(0)
 	}
 	sp := startSpinner(os.Stderr, "Exporting conversations…")
-	conv, err := providers.ExportConversations(providers.ConvExportOptions{
+	conv, err := crossmem.ExportConversations(crossmem.ConvExportOptions{
 		Out:      *out,
 		Provider: *provider,
 		CWD:      positional,
@@ -511,7 +511,7 @@ func runImport(args []string, stdout io.Writer) error {
 	if positional == "" && fs.NArg() > 0 {
 		positional = fs.Arg(0)
 	}
-	res, err := providers.ImportConversations(providers.ConvImportOptions{
+	res, err := crossmem.ImportConversations(crossmem.ConvImportOptions{
 		In:     *in,
 		Out:    *out,
 		CWD:    positional,
@@ -550,7 +550,7 @@ func runSync(args []string, stdout io.Writer) error {
 		return err
 	}
 	sp := startSpinner(os.Stderr, "Syncing with rclone…")
-	res, err := providers.SyncDump(providers.SyncOptions{Remote: *remote, Pull: *pull, Prune: *prune, Out: *out})
+	res, err := crossmem.SyncDump(crossmem.SyncOptions{Remote: *remote, Pull: *pull, Prune: *prune, Out: *out})
 	sp.Stop()
 	if err != nil {
 		return err
@@ -592,7 +592,7 @@ func runConfig(args []string, stdout io.Writer) error {
 		return err
 	}
 	if *initFlag {
-		path, created, err := providers.InitConfig()
+		path, created, err := crossmem.InitConfig()
 		if err != nil {
 			return err
 		}
@@ -606,13 +606,13 @@ func runConfig(args []string, stdout io.Writer) error {
 
 	// A malformed config is reported here rather than swallowed, because this is
 	// the command someone runs when their override is not taking effect.
-	config, loadErr := providers.LoadConfig()
-	stores := providers.EffectiveStores()
+	config, loadErr := crossmem.LoadConfig()
+	stores := crossmem.EffectiveStores()
 	if *jsonOut {
 		payload := struct {
-			Config providers.Config           `json:"config"`
-			Error  string                     `json:"error,omitempty"`
-			Stores []providers.StoreCandidate `json:"stores"`
+			Config crossmem.Config           `json:"config"`
+			Error  string                    `json:"error,omitempty"`
+			Stores []crossmem.StoreCandidate `json:"stores"`
 		}{Config: config, Stores: stores}
 		if loadErr != nil {
 			payload.Error = loadErr.Error()
@@ -629,10 +629,10 @@ func runConfig(args []string, stdout io.Writer) error {
 	// Report what is actually in effect, not what the file asked for: a config
 	// that failed to load is discarded, and printing its values would describe
 	// behaviour the user is not getting.
-	defaults := providers.UserDefaults()
+	defaults := crossmem.UserDefaults()
 	mode := defaults.Mode
 	if mode == "" {
-		mode = providers.ModeSummary + " (built-in)"
+		mode = crossmem.ModeSummary + " (built-in)"
 	}
 	fmt.Fprintf(stdout, "default mode:  %s\n", mode)
 	if defaults.Limit > 0 {
@@ -664,7 +664,7 @@ func runScan(args []string, stdout io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	stores, err := providers.DiscoverStores()
+	stores, err := crossmem.DiscoverStores()
 	if err != nil {
 		return err
 	}
@@ -712,7 +712,7 @@ func runList(args []string, stdout io.Writer) error {
 		cwd = *folder
 	}
 	sp := startSpinner(os.Stderr, "Scanning sessions…")
-	sessions, err := providers.ListSessions(providers.ListOptions{
+	sessions, err := crossmem.ListSessions(crossmem.ListOptions{
 		Provider:       *provider,
 		CWD:            cwd,
 		Limit:          resolveLimit(fs, limit, 50),
@@ -776,7 +776,7 @@ func runLoad(args []string, stdout io.Writer) error {
 	limit := fs.Int("limit", 10, "limit")
 	out := fs.String("out", "", "output file")
 	full := fs.Bool("full", false, "emit fuller per-session excerpts instead of the compact summary")
-	mode := fs.String("mode", providers.ModeSummary, "summary or full")
+	mode := fs.String("mode", crossmem.ModeSummary, "summary or full")
 	includeCurrent := fs.Bool("include-current", false, "include the session this process is running inside")
 	session := fs.String("session", "", "load one specific session transcript by path")
 	if err := fs.Parse(args); err != nil {
@@ -795,9 +795,9 @@ func runLoad(args []string, stdout io.Writer) error {
 	var bundle string
 	var err error
 	if *session != "" {
-		bundle, err = providers.BuildSessionContext(*session, cwd, wantFull)
+		bundle, err = crossmem.BuildSessionContext(*session, cwd, wantFull)
 	} else {
-		bundle, err = providers.BuildContext(providers.ListOptions{
+		bundle, err = crossmem.BuildContext(crossmem.ListOptions{
 			Provider:       *provider,
 			CWD:            cwd,
 			Limit:          wantLimit,
@@ -832,11 +832,11 @@ func resolveMode(fs *flag.FlagSet, mode *string, full *bool) bool {
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 	switch {
 	case explicit["mode"]:
-		return *mode == providers.ModeFull
+		return *mode == crossmem.ModeFull
 	case explicit["full"]:
 		return *full
 	default:
-		return providers.UserDefaults().Full()
+		return crossmem.UserDefaults().Full()
 	}
 }
 
@@ -852,7 +852,7 @@ func resolveLimit(fs *flag.FlagSet, limit *int, builtin int) int {
 	if explicit {
 		return *limit
 	}
-	if configured := providers.UserDefaults().Limit; configured > 0 {
+	if configured := crossmem.UserDefaults().Limit; configured > 0 {
 		return configured
 	}
 	return builtin
