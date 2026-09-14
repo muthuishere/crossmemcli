@@ -154,8 +154,14 @@ func (c *Client) exportDump(opts ExportOptions) (DumpManifest, error) {
 			continue
 		}
 		destination := extra.Section + "/" + extra.Name
-		if err := c.copyFile(source, filepath.Join(out, filepath.FromSlash(destination))); err != nil {
+		copied, err := c.copyExtraFile(source, filepath.Join(out, filepath.FromSlash(destination)))
+		if err != nil {
 			return DumpManifest{}, fmt.Errorf("export %s: %w", extra.Name, err)
+		}
+		if !copied {
+			// Never list a file the dump does not contain: import would then
+			// look for bytes that are not there.
+			continue
 		}
 		entry := DumpFile{Name: extra.Name, Source: source, Destination: destination}
 		if extra.Section == "memory" {
@@ -268,6 +274,12 @@ func (c *Client) importDump(opts ImportOptions) (ImportResult, error) {
 				continue
 			}
 			src := filepath.Join(in, filepath.FromSlash(entry.Destination))
+			if _, err := os.Stat(src); err != nil {
+				// Dumps written by 0.1.9–0.1.10 list a symlinked instruction file
+				// they never copied. Report it rather than abort the whole import.
+				res.Missing = append(res.Missing, fmt.Sprintf("%s/%s — listed in the manifest but not in the dump", section.label, entry.Name))
+				continue
+			}
 			if err := c.restoreOne(src, dest, opts, &res); err != nil {
 				return res, err
 			}
@@ -536,6 +548,40 @@ func isWithin(root string, path string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// copyExtraFile exports one well-known instruction or memory file. Unlike a
+// store walk, it follows a symlink: these names are a fixed allowlist, and
+// keeping CLAUDE.md / AGENTS.md as a link to one shared copy is a common setup
+// (~/.claude-cys/CLAUDE.md -> ~/.claudedefault/CLAUDE.md). The resolved target
+// still passes the export filters, so a link into a vault or at a credential
+// file is not followed. It reports whether bytes were written.
+func (c *Client) copyExtraFile(source string, dest string) (bool, error) {
+	target, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		c.log.debugf("export skip unresolvable %q err=%q", source, err)
+		return false, nil
+	}
+	if skipExportFile(filepath.Base(target)) {
+		c.log.debugf("export skip filtered target %q -> %q", source, target)
+		return false, nil
+	}
+	for _, segment := range strings.Split(filepath.ToSlash(filepath.Dir(target)), "/") {
+		if segment != "" && skipExportDir(segment) {
+			c.log.debugf("export skip target in filtered dir %q -> %q", source, target)
+			return false, nil
+		}
+	}
+	info, err := os.Stat(target)
+	if err != nil || !info.Mode().IsRegular() {
+		return false, nil
+	}
+	if err := c.copyFile(target, dest); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// copyFile copies a regular file, refusing symlinks so a dump never follows a
+// link outside its store.
 func (c *Client) copyFile(src string, dest string) error {
 	info, err := os.Lstat(src)
 	if err != nil {

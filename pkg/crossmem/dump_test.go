@@ -234,3 +234,77 @@ func walkNames(root string, name string) []string {
 	})
 	return found
 }
+
+// A symlinked global instruction file (~/.claude-cys/CLAUDE.md -> a shared copy)
+// is exported with its target's bytes. A link that resolves into a vault is
+// not followed and leaves no manifest entry. A manifest entry whose file is
+// missing — what 0.1.9/0.1.10 wrote for symlinks — is reported, not fatal.
+func TestExportFollowsInstructionSymlinksSafely(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, "no-codex"))
+	claudeConfig := filepath.Join(home, "claude-cys")
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeConfig)
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	writeConfigPointingEveryStoreAt(t, configPath, nil)
+	t.Setenv("CROSSMEM_CONFIG", configPath)
+	resetConfigForTest(t)
+
+	shared := filepath.Join(home, "claudedefault", "CLAUDE.md")
+	mustWrite(t, shared, "shared global instructions\n")
+	if err := os.MkdirAll(claudeConfig, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(claudeConfig, "CLAUDE.md")
+	if err := os.Symlink(shared, link); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+
+	out := filepath.Join(t.TempDir(), "dump")
+	manifest, err := ExportDump(ExportOptions{Out: out})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(out, "instructions", "claude", "CLAUDE.md"))
+	if err != nil || string(got) != "shared global instructions\n" {
+		t.Fatalf("symlinked CLAUDE.md not exported with its target's bytes: %v %q", err, got)
+	}
+	if len(manifest.Instructions) != 1 {
+		t.Fatalf("manifest instructions = %#v", manifest.Instructions)
+	}
+
+	// Repoint the link into a vault: it must not be followed.
+	secret := filepath.Join(home, "vault", "CLAUDE.md")
+	mustWrite(t, secret, "do not export\n")
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+	out2 := filepath.Join(t.TempDir(), "dump2")
+	manifest2, err := ExportDump(ExportOptions{Out: out2})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if len(manifest2.Instructions) != 0 {
+		t.Fatalf("a link into a vault was exported: %#v", manifest2.Instructions)
+	}
+	if _, err := os.Stat(filepath.Join(out2, "instructions", "claude", "CLAUDE.md")); err == nil {
+		t.Fatal("vault content landed in the dump")
+	}
+
+	// A manifest that lists a file the dump lacks imports with a Missing note.
+	manifest2.Instructions = []DumpFile{{Name: "claude/CLAUDE.md", Destination: "instructions/claude/CLAUDE.md"}}
+	body, _ := json.Marshal(manifest2)
+	if err := os.WriteFile(filepath.Join(out2, "manifest.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := ImportDump(ImportOptions{In: out2, DryRun: true})
+	if err != nil {
+		t.Fatalf("import of a dump with a phantom entry failed: %v", err)
+	}
+	if len(res.Missing) != 1 || !strings.Contains(res.Missing[0], "not in the dump") {
+		t.Fatalf("missing = %#v", res.Missing)
+	}
+}
