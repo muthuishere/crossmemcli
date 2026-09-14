@@ -23,27 +23,36 @@ func TestReadCopilotFolder(t *testing.T) {
 	}
 }
 
+// absPath turns a slash path into an absolute one on this OS: "/a/b" stays
+// "/a/b" on Unix and becomes "C:\\a\\b" on Windows, where "/a/b" is not absolute.
+func absPath(t *testing.T, slashed string) string {
+	t.Helper()
+	root := filepath.VolumeName(t.TempDir()) + string(filepath.Separator)
+	return filepath.Join(root, filepath.FromSlash(slashed))
+}
+
 func TestSameOrChild(t *testing.T) {
+	a := func(p string) string { return absPath(t, p) }
 	cases := []struct {
 		name  string
 		value string
 		root  string
 		want  bool
 	}{
-		{"identical", "/a/b/c", "/a/b/c", true},
-		{"child", "/a/b/c/d", "/a/b/c", true},
-		{"parent is not child", "/a/b", "/a/b/c", false},
-		{"sibling", "/a/b/x", "/a/b/c", false},
+		{"identical", a("/a/b/c"), a("/a/b/c"), true},
+		{"child", a("/a/b/c/d"), a("/a/b/c"), true},
+		{"parent is not child", a("/a/b"), a("/a/b/c"), false},
+		{"sibling", a("/a/b/x"), a("/a/b/c"), false},
 		// A real folder name containing a dash must match itself. This is the
 		// regression: the encoded Claude store dir decodes "-" back to "/",
 		// so matching has to use the real cwd, not the decoded path.
-		{"dash in folder name", "/u/m/crossmem-workspace/cli", "/u/m/crossmem-workspace/cli", true},
+		{"dash in folder name", a("/u/m/crossmem-workspace/cli"), a("/u/m/crossmem-workspace/cli"), true},
 		// A title sentence is not a path and must never match a folder. Before
 		// the fix, a relative string was resolved against the process cwd and
 		// matched almost anything.
-		{"sentence never matches", "Load Claude sessions that modified this repo", "/a/b/c", false},
-		{"empty value", "", "/a/b/c", false},
-		{"empty root", "/a/b/c", "", false},
+		{"sentence never matches", "Load Claude sessions that modified this repo", a("/a/b/c"), false},
+		{"empty value", "", a("/a/b/c"), false},
+		{"empty root", a("/a/b/c"), "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,11 +64,11 @@ func TestSameOrChild(t *testing.T) {
 }
 
 func TestFilterByCWDMatchesOnRealWorkspaceOnly(t *testing.T) {
-	cwd := "/u/m/crossmem-workspace/cli"
+	cwd := absPath(t, "/u/m/crossmem-workspace/cli")
 	sessions := []Session{
 		{Provider: "claude", Workspace: cwd, Title: "this folder's session"},
-		{Provider: "codex", Workspace: "/u/m/other-repo", Title: cwd}, // title looks like the cwd, but workspace is elsewhere
-		{Provider: "claude", Workspace: "/u/m/unrelated", Title: "some sentence"},
+		{Provider: "codex", Workspace: absPath(t, "/u/m/other-repo"), Title: cwd}, // title looks like the cwd, but workspace is elsewhere
+		{Provider: "claude", Workspace: absPath(t, "/u/m/unrelated"), Title: "some sentence"},
 	}
 	got := filterByCWD(sessions, cwd)
 	if len(got) != 1 {

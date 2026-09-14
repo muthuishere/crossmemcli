@@ -197,7 +197,12 @@ func TestSyncRejectsMissingDump(t *testing.T) {
 
 func TestDefaultDumpDirFromConfig(t *testing.T) {
 	custom := filepath.Join(t.TempDir(), "mydump")
-	t.Setenv("CROSSMEM_CONFIG", writeConfig(t, `{"dumpDir":"`+custom+`"}`))
+	// Marshal, not concatenate: a Windows path's backslashes are JSON escapes.
+	body, err := json.Marshal(map[string]string{"dumpDir": custom})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CROSSMEM_CONFIG", writeConfig(t, string(body)))
 	resetConfigForTest(t)
 	if got := DefaultDumpDir(); got != custom {
 		t.Fatalf("DefaultDumpDir = %q, want %q", got, custom)

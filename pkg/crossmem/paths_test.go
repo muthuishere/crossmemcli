@@ -26,8 +26,12 @@ func TestExpandPathDropsUnsetEnvCandidates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := expandPath(tc.in); got != tc.want {
-				t.Fatalf("expandPath(%q) = %q, want %q", tc.in, got, tc.want)
+			want := tc.want
+			if want != "" {
+				want = filepath.Clean(want) // separators are the OS's own after expansion
+			}
+			if got := expandPath(tc.in); got != want {
+				t.Fatalf("expandPath(%q) = %q, want %q", tc.in, got, want)
 			}
 		})
 	}
