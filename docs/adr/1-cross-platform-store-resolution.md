@@ -6,7 +6,7 @@
 
 ## Decision
 
-1. **A store is declared once, as an ordered list of per-OS path candidates** — never as a single hardcoded path, and never behind a `runtime.GOOS` branch. `storeDefinitions` in `internal/providers/paths.go` is the only place a store location may be written.
+1. **A store is declared once, as an ordered list of per-OS path candidates** — never as a single hardcoded path, and never behind a `runtime.GOOS` branch. `storeDefinitions` in `pkg/crossmem/paths.go` is the only place a store location may be written.
 2. **Platform selection happens by environment-variable resolution, not by OS detection.** `expandPath` resolves `~`, `%VAR%`, `$VAR`/`${VAR}` and returns `""` when a referenced variable is unset on this machine. A `%APPDATA%/...` candidate therefore evaporates on macOS and a `$XDG_DATA_HOME/...` candidate evaporates on Windows, with no conditional code.
 3. **Call sites never build paths.** They go through `storePath(provider, kind)` (best existing location), `storePaths(...)` (all existing locations, globs expanded), or `providerRoots(...)` (walkable roots, each labelled with its owning provider).
 4. **The user can repoint any store** from `~/.config/crossmemcli/config.json` (or `$CROSSMEM_CONFIG`). `stores` replaces a store's candidates; `extraStores` appends. Keys are `provider:kind`, or a bare `provider` resolving only to the definition marked `Primary`. Unknown keys are a load error.
@@ -102,9 +102,9 @@ Consequently `devin-gui` declares two stores: `vscode-workspace-storage` (kept, 
 
 ## Source files
 
-- `internal/providers/paths.go` — `storeDefinitions`, `appDataRoots`, `vscodeUserRoots`, `expandPath`, `storePath(s)`, `providerRoots`, `isWorkspaceStoragePath`, `isVSCodeChat`
-- `internal/providers/config.go` — `Config`, `LoadConfig`, `candidatesFor`, `EffectiveStores`, `InitConfig`
-- `internal/providers/list.go` — `decodeClaudeDir`, `readCopilotFolder`, `sameOrChild`, `inferWorkspace`
-- `internal/providers/scan.go` — `DiscoverStores`
+- `pkg/crossmem/paths.go` — `storeDefinitions`, `appDataRoots`, `vscodeUserRoots`, `expandPath`, `storePath(s)`, `providerRoots`, `isWorkspaceStoragePath`, `isVSCodeChat`
+- `pkg/crossmem/config.go` — `Config`, `LoadConfig`, `candidatesFor`, `EffectiveStores`, `InitConfig`
+- `pkg/crossmem/list.go` — `decodeClaudeDir`, `readCopilotFolder`, `sameOrChild`, `inferWorkspace`
+- `pkg/crossmem/scan.go` — `DiscoverStores`
 - `internal/app/app.go` — `runConfig` and `configHelpText`
-- Tests: `internal/providers/paths_test.go`, `internal/providers/config_test.go`
+- Tests: `pkg/crossmem/paths_test.go`, `pkg/crossmem/config_test.go`

@@ -57,7 +57,7 @@ the help text lie about what is readable.
 
 ## Details
 
-### Store declarations (`internal/providers/paths.go`)
+### Store declarations (`pkg/crossmem/paths.go`)
 
 ```go
 var devinCLIRoots = append(
@@ -125,8 +125,8 @@ change in one table, consistent with ADR 1. `devin:sqlite-sessions` uses
 
 ## Source files
 
-- `internal/providers/paths.go` — `devinCLIRoots`, `devinSessionDBCandidates`, `storeDefinitions`, `inferProvider`, `isVSCodeChat`
-- `internal/providers/list.go` — `devinDB`
-- `internal/providers/context.go` — `extractObject`
+- `pkg/crossmem/paths.go` — `devinCLIRoots`, `devinSessionDBCandidates`, `storeDefinitions`, `inferProvider`, `isVSCodeChat`
+- `pkg/crossmem/list.go` — `devinDB`
+- `pkg/crossmem/context.go` — `extractObject`
 - `internal/app/app.go` — `--provider` help, `configHelpText`
-- Tests: `internal/providers/paths_test.go` (`TestDevinCandidatesCoverWindows`, `TestDevinDBHonorsEnvOverrides`, `TestDevinIsTheOnlySessionSource`, `TestDevinHasNoDesktopCascadeStore`)
+- Tests: `pkg/crossmem/paths_test.go` (`TestDevinCandidatesCoverWindows`, `TestDevinDBHonorsEnvOverrides`, `TestDevinIsTheOnlySessionSource`, `TestDevinHasNoDesktopCascadeStore`)

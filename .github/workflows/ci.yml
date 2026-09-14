@@ -10,7 +10,16 @@ permissions:
 
 jobs:
   go:
-    runs-on: ubuntu-latest
+    # pkg/crossmem is a library now (ADR 3): its path handling has to hold on
+    # every OS a consumer builds for, not only the one CI happens to run on.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -19,9 +28,10 @@ jobs:
           cache: true
       - run: go test ./...
       - run: go vet ./...
-      - run: go build -o bin/crossmem ./cmd/crossmem
-      - run: ./bin/crossmem --version
-      - run: ./bin/crossmem --help
+      - run: go vet -tags stress ./...
+      - run: go build -o "bin/crossmem$(go env GOEXE)" ./cmd/crossmem
+      - run: ./bin/crossmem$(go env GOEXE) --version
+      - run: ./bin/crossmem$(go env GOEXE) --help
 
   goreleaser:
     runs-on: ubuntu-latest

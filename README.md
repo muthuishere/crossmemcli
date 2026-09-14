@@ -108,6 +108,24 @@ crossmem help load
 crossmem help list
 ```
 
+## Use as a Go library
+
+`pkg/crossmem` is the same engine the CLI runs, with no process-global state, so an embedding program (a Go agent orchestrator, for example) can link it instead of shelling out to whatever `crossmem` is on `PATH`:
+
+```sh
+go get github.com/muthuishere/crossmemcli@latest
+```
+
+```go
+c, err := crossmem.New(crossmem.Options{}) // config, current session, debug: all per client
+sessions, err := c.List(ctx, crossmem.ListOptions{CWD: root, Limit: 5})
+tr, err := c.Transcript(ctx, sessions[0].Ref)          // typed events: role, name, content, time
+md, err := c.Load(ctx, sessions[0].Ref, crossmem.LoadFull) // the Markdown bundle `load` prints
+rules, err := c.Guardrails(root)                       // authoritative repo instructions
+```
+
+`Options.Config` points a client at its own stores without environment variables; several clients with different configs can run side by side. OpenCode subagent sessions are folded into their parent's `Children` unless `ListOptions.IncludeSubagents` is set. `pkg/skillinstall` installs any skill directory from an `fs.FS` the way `crossmem install --skills` does. The package follows semver from v0.2.0 and the JSON field names of `Session`, `Store`, `QARecord`, `Transcript`, and `Event` are frozen. Design and verification: [ADR 3](docs/adr/3-public-library-api.md); runnable example: `go run ./examples/list <folder>`.
+
 ## Export / import (qa.jsonl)
 
 `crossmem export` writes one `qa.jsonl` of every question, the full answer, and
