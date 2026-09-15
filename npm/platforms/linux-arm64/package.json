@@ -1,6 +1,6 @@
 {
   "name": "@muthuishere/crossmem-linux-arm64",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "crossmem prebuilt binary for linux-arm64",
   "repository": {
     "type": "git",

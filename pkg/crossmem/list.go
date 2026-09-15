@@ -29,6 +29,15 @@ func (c *Client) listSessions(opts ListOptions) ([]Session, error) {
 			opts.CWD = abs
 		}
 	}
+	// A worktree is a different path but the same repository, so the sessions
+	// that hold this work's context may be recorded against the main checkout.
+	folders := []string{}
+	if opts.CWD != "" {
+		folders = append(folders, opts.CWD)
+		if !opts.SkipLinkedWorktrees {
+			folders = relatedFolders(opts.CWD)
+		}
+	}
 
 	// The SQLite providers limit in the query, but sessions are dropped after
 	// that — the caller's own live session, and anything outside the folder. Ask
@@ -37,7 +46,7 @@ func (c *Client) listSessions(opts ListOptions) ([]Session, error) {
 
 	var sessions []Session
 	if opts.Provider == "all" || opts.Provider == "devin" {
-		devin, err := c.listDevin(queryLimit, opts.CWD)
+		devin, err := c.listDevin(queryLimit, folders)
 		if err == nil {
 			sessions = append(sessions, devin...)
 		} else {
@@ -45,7 +54,7 @@ func (c *Client) listSessions(opts ListOptions) ([]Session, error) {
 		}
 	}
 	if opts.Provider == "all" || opts.Provider == "opencode" {
-		opencode, err := c.listOpenCode(queryLimit, opts.CWD, opts.IncludeSubagents)
+		opencode, err := c.listOpenCode(queryLimit, folders, opts.IncludeSubagents)
 		if err == nil {
 			sessions = append(sessions, opencode...)
 		} else {
@@ -53,7 +62,7 @@ func (c *Client) listSessions(opts ListOptions) ([]Session, error) {
 		}
 	}
 	if opts.Provider == "all" || opts.Provider == "copilot-cli" {
-		copilotCLI, err := c.listCopilotCLI(queryLimit, opts.CWD)
+		copilotCLI, err := c.listCopilotCLI(queryLimit, folders)
 		if err == nil {
 			sessions = append(sessions, copilotCLI...)
 		} else {
@@ -73,8 +82,8 @@ func (c *Client) listSessions(opts ListOptions) ([]Session, error) {
 			c.log.debugf("list jsonl root=%q provider=%s err=%q", root.Path, root.Provider, err)
 			continue
 		}
-		if opts.CWD != "" {
-			jsonl = filterByCWD(jsonl, opts.CWD)
+		if len(folders) > 0 {
+			jsonl = filterByCWD(jsonl, folders)
 		}
 		sessions = append(sessions, jsonl...)
 	}
@@ -100,13 +109,13 @@ func (c *Client) listSessions(opts ListOptions) ([]Session, error) {
 	return sessions, nil
 }
 
-func filterByCWD(sessions []Session, cwd string) []Session {
+func filterByCWD(sessions []Session, folders []string) []Session {
 	filtered := make([]Session, 0, len(sessions))
 	for _, session := range sessions {
 		// Match on the real working directory only. The session belongs to the
 		// target folder when its cwd is that folder or sits under it. Titles are
 		// human sentences, not paths, so they are never used for matching.
-		if sameOrChild(session.Workspace, cwd) {
+		if matchesAnyFolder(session.Workspace, folders) {
 			filtered = append(filtered, session)
 		}
 	}
@@ -268,7 +277,7 @@ func (c *Client) devinDB() string {
 	return c.storePath("devin", "sqlite-sessions")
 }
 
-func (c *Client) listDevin(limit int, cwdFilter string) ([]Session, error) {
+func (c *Client) listDevin(limit int, folders []string) ([]Session, error) {
 	dbPath := c.devinDB()
 	if dbPath == "" {
 		return nil, nil
@@ -284,7 +293,7 @@ func (c *Client) listDevin(limit int, cwdFilter string) ([]Session, error) {
 	defer db.Close()
 
 	rows, err := withRetry(c.log, "query devin sessions", func() (*sql.Rows, error) {
-		query, args := listQuery(`select id, title, working_directory, backend_type, model, agent_mode, last_activity_at from sessions where hidden = 0 order by last_activity_at desc`, limit, cwdFilter)
+		query, args := listQuery(`select id, title, working_directory, backend_type, model, agent_mode, last_activity_at from sessions where hidden = 0 order by last_activity_at desc`, limit, len(folders) > 0)
 		return db.QueryContext(c.context(), query, args...)
 	})
 	if err != nil {
@@ -312,7 +321,7 @@ func (c *Client) listDevin(limit int, cwdFilter string) ([]Session, error) {
 			Workspace: workingDirectory,
 			Title:     title,
 		}
-		if cwdFilter != "" && !sameOrChild(session.Workspace, cwdFilter) {
+		if len(folders) > 0 && !matchesAnyFolder(session.Workspace, folders) {
 			continue
 		}
 		sessions = append(sessions, session)

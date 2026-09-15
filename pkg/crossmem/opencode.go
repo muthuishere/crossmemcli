@@ -17,7 +17,7 @@ func (c *Client) openCodeDBs() []string {
 	return c.storePaths("opencode", "sqlite-sessions")
 }
 
-func (c *Client) listOpenCode(limit int, cwdFilter string, includeSubagents bool) ([]Session, error) {
+func (c *Client) listOpenCode(limit int, folders []string, includeSubagents bool) ([]Session, error) {
 	var sessions []Session
 	seen := map[string]bool{}
 	for _, dbPath := range c.openCodeDBs() {
@@ -41,7 +41,7 @@ func (c *Client) listOpenCode(limit int, cwdFilter string, includeSubagents bool
 				base += ` where parent_id is null`
 			}
 		}
-		query, args := listQuery(base+` order by time_updated desc`, limit, cwdFilter)
+		query, args := listQuery(base+` order by time_updated desc`, limit, len(folders) > 0)
 		rows, err := withRetry(c.log, "query opencode sessions", func() (*sql.Rows, error) {
 			return db.QueryContext(c.context(), query, args...)
 		})
@@ -74,7 +74,7 @@ func (c *Client) listOpenCode(limit int, cwdFilter string, includeSubagents bool
 			if parent != "" {
 				session.Parent = "opencode:" + parent
 			}
-			if cwdFilter != "" && !sameOrChild(session.Workspace, cwdFilter) {
+			if len(folders) > 0 && !matchesAnyFolder(session.Workspace, folders) {
 				continue
 			}
 			found = append(found, session)

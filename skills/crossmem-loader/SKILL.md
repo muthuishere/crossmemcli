@@ -42,6 +42,11 @@ crossmem list . --limit 5
 The `ref` is the handle you pass to `load`: a transcript path, or
 `devin:<id>` / `opencode:<id>` / `copilot-cli:<id>`.
 
+If the folder is a git worktree, sessions from the repository's other checkouts (the
+main repo, sibling worktrees) are listed too — that is usually where the work being
+resumed was actually done. Their `workspace` shows which checkout. `--no-worktrees`
+confines the list to the folder itself.
+
 OpenCode subagent sessions (`@explore`, `@general`) are folded into the session that
 spawned them — its JSON carries their refs as `children` — so the list shows the work
 the user did, not every helper it ran. Pass `--subagents` only when they ask about one.

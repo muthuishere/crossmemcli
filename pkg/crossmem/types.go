@@ -67,6 +67,11 @@ type ListOptions struct {
 	// Deterministic drops generated-at timestamps so repeated runs produce
 	// byte-identical output. Set by `update`, which writes files to disk.
 	Deterministic bool
+	// SkipLinkedWorktrees confines the folder filter to CWD itself. By default
+	// a folder inside a git repository also matches the repository's other
+	// checkouts — the main worktree and its linked worktrees — because an agent
+	// working in a worktree still wants the context recorded in the main repo.
+	SkipLinkedWorktrees bool
 	// IncludeSubagents lists subagent sessions (Session.Parent set) as rows of
 	// their own. Off by default: they are part of their parent's work.
 	IncludeSubagents bool

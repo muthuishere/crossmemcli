@@ -126,6 +126,17 @@ rules, err := c.Guardrails(root)                       // authoritative repo ins
 
 `Options.Config` points a client at its own stores without environment variables; several clients with different configs can run side by side. OpenCode subagent sessions are folded into their parent's `Children` unless `ListOptions.IncludeSubagents` is set. `pkg/skillinstall` installs any skill directory from an `fs.FS` the way `crossmem install --skills` does. The package follows semver from v0.2.0 and the JSON field names of `Session`, `Store`, `QARecord`, `Transcript`, and `Event` are frozen. Design and verification: [ADR 3](docs/adr/3-public-library-api.md); runnable example: `go run ./examples/list <folder>`.
 
+## Git worktrees
+
+A folder inside a git repository also matches the repository's **other checkouts** — the main worktree and any linked worktrees. Agents work one worktree per task, so the session that holds the context for that work is often recorded against the main repo, under a different path:
+
+```sh
+crossmem list ~/.worktrees/myrepo/feature     # also finds sessions from ~/code/myrepo
+crossmem list ~/.worktrees/myrepo/feature --no-worktrees   # only this checkout
+```
+
+Resolved by reading git's own files, so no `git` binary is needed. Non-repository folders are unaffected.
+
 ## Export / import (qa.jsonl)
 
 `crossmem export` writes one `qa.jsonl` of every question, the full answer, and

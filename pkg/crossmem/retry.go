@@ -66,8 +66,8 @@ func containsAny(text string, needles []string) bool {
 // so limiting in SQL first would return an empty page for a folder whose
 // sessions are older than the newest `limit` rows elsewhere. Those rows stream
 // instead and the caller stops once it has `limit` matches.
-func listQuery(query string, limit int, cwdFilter string) (string, []any) {
-	if cwdFilter != "" {
+func listQuery(query string, limit int, filtered bool) (string, []any) {
+	if filtered {
 		return query, nil
 	}
 	return query + " limit ?", []any{limit}

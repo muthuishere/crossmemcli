@@ -28,7 +28,7 @@ func (c *Client) openCopilotCLIDB() (*sql.DB, os.FileInfo, string, error) {
 	return db, info, dbPath, nil
 }
 
-func (c *Client) listCopilotCLI(limit int, cwdFilter string) ([]Session, error) {
+func (c *Client) listCopilotCLI(limit int, folders []string) ([]Session, error) {
 	db, info, dbPath, err := c.openCopilotCLIDB()
 	if err != nil {
 		return nil, nil
@@ -36,7 +36,7 @@ func (c *Client) listCopilotCLI(limit int, cwdFilter string) ([]Session, error) 
 	defer db.Close()
 
 	rows, err := withRetry(c.log, "query copilot-cli sessions", func() (*sql.Rows, error) {
-		query, args := listQuery(`select id, cwd, summary, updated_at from sessions order by updated_at desc`, limit, cwdFilter)
+		query, args := listQuery(`select id, cwd, summary, updated_at from sessions order by updated_at desc`, limit, len(folders) > 0)
 		return db.QueryContext(c.context(), query, args...)
 	})
 	if err != nil {
@@ -62,7 +62,7 @@ func (c *Client) listCopilotCLI(limit int, cwdFilter string) ([]Session, error) 
 			Workspace: cwd.String,
 			Title:     summary.String,
 		}
-		if cwdFilter != "" && !sameOrChild(session.Workspace, cwdFilter) {
+		if len(folders) > 0 && !matchesAnyFolder(session.Workspace, folders) {
 			continue
 		}
 		sessions = append(sessions, session)

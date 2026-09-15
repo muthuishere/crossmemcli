@@ -87,6 +87,7 @@ Options:
   --limit <number>                        maximum sessions to print (default: 50)
   --include-current                       also show the session this process is running inside
   --subagents                             also list subagent sessions as their own rows (hidden by default)
+  --no-worktrees                          match only this folder, not the repo's other git worktrees
   --no-questions                          skip the first/last question lookup (faster)
   --json                                  print sessions as JSON
   -h, --help                              display help for command
@@ -433,6 +434,7 @@ func runUpdate(args []string, stdout io.Writer) error {
 	full := fs.Bool("full", false, "write fuller per-session excerpts")
 	mode := fs.String("mode", crossmem.ModeSummary, "summary or full")
 	includeCurrent := fs.Bool("include-current", false, "include the session this process is running inside")
+	noWorktrees := fs.Bool("no-worktrees", false, "match only this folder, not the repository's other git worktrees")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -440,11 +442,12 @@ func runUpdate(args []string, stdout io.Writer) error {
 		cwd = "."
 	}
 	result, err := crossmem.UpdateContext(crossmem.ListOptions{
-		Provider:       *provider,
-		CWD:            cwd,
-		Limit:          resolveLimit(fs, limit, 10),
-		Full:           resolveMode(fs, mode, full),
-		IncludeCurrent: *includeCurrent,
+		Provider:            *provider,
+		CWD:                 cwd,
+		Limit:               resolveLimit(fs, limit, 10),
+		Full:                resolveMode(fs, mode, full),
+		IncludeCurrent:      *includeCurrent,
+		SkipLinkedWorktrees: *noWorktrees,
 	})
 	if err != nil {
 		return err
@@ -705,6 +708,7 @@ func runList(args []string, stdout io.Writer) error {
 	includeCurrent := fs.Bool("include-current", false, "include the session this process is running inside")
 	subagents := fs.Bool("subagents", false, "also list subagent sessions as their own rows")
 	noQuestions := fs.Bool("no-questions", false, "skip the first/last question lookup")
+	noWorktrees := fs.Bool("no-worktrees", false, "match only this folder, not the repository's other git worktrees")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -716,12 +720,13 @@ func runList(args []string, stdout io.Writer) error {
 	}
 	sp := startSpinner(os.Stderr, "Scanning sessions…")
 	sessions, err := crossmem.ListSessions(crossmem.ListOptions{
-		Provider:         *provider,
-		CWD:              cwd,
-		Limit:            resolveLimit(fs, limit, 50),
-		IncludeCurrent:   *includeCurrent,
-		Questions:        !*noQuestions,
-		IncludeSubagents: *subagents,
+		Provider:            *provider,
+		CWD:                 cwd,
+		Limit:               resolveLimit(fs, limit, 50),
+		IncludeCurrent:      *includeCurrent,
+		Questions:           !*noQuestions,
+		IncludeSubagents:    *subagents,
+		SkipLinkedWorktrees: *noWorktrees,
 	})
 	sp.Stop()
 	if err != nil {
@@ -783,6 +788,7 @@ func runLoad(args []string, stdout io.Writer) error {
 	mode := fs.String("mode", crossmem.ModeSummary, "summary or full")
 	includeCurrent := fs.Bool("include-current", false, "include the session this process is running inside")
 	session := fs.String("session", "", "load one specific session transcript by path")
+	noWorktrees := fs.Bool("no-worktrees", false, "match only this folder, not the repository's other git worktrees")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -802,11 +808,12 @@ func runLoad(args []string, stdout io.Writer) error {
 		bundle, err = crossmem.BuildSessionContext(*session, cwd, wantFull)
 	} else {
 		bundle, err = crossmem.BuildContext(crossmem.ListOptions{
-			Provider:       *provider,
-			CWD:            cwd,
-			Limit:          wantLimit,
-			Full:           wantFull,
-			IncludeCurrent: *includeCurrent,
+			Provider:            *provider,
+			CWD:                 cwd,
+			Limit:               wantLimit,
+			Full:                wantFull,
+			IncludeCurrent:      *includeCurrent,
+			SkipLinkedWorktrees: *noWorktrees,
 		})
 	}
 	sp.Stop()
@@ -890,7 +897,7 @@ func flagTakesValue(arg string) bool {
 		return false
 	}
 	switch name {
-	case "json", "full", "include-current", "subagents", "no-questions", "merge",
+	case "json", "full", "include-current", "subagents", "no-worktrees", "no-questions", "merge",
 		"dry-run", "force", "prune", "pull", "skills", "agents", "help", "h",
 		"version", "V", "init":
 		return false

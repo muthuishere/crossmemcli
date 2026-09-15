@@ -67,7 +67,7 @@ Anything shared by forks keys off the **path shape**, not the provider name: `is
 
 Windows path shapes also matter inside the JSONL providers: compare paths through `pathsEqual`/`normalizeCase` (case-folded on Windows), match store-relative segments on `filepath.ToSlash(path)`, and decode Claude's encoded project dir via `decodeClaudeDir` (`C--Users-m-repo` → `C:\Users\m\repo`). VS Code writes Windows folders as `file:///c%3A/...`, whose leading slash `readCopilotFolder` strips.
 
-`ListSessions` merges both, sorts by mtime desc, applies `--limit`. CWD/folder filtering (`filterByCWD` / `sameOrChild`) matches a session's workspace or title against the target repo path.
+`ListSessions` merges both, sorts by mtime desc, applies `--limit`. CWD/folder filtering (`filterByCWD` / `matchesAnyFolder` / `sameOrChild`) matches a session's workspace against the target folder. That target is a **set** of folders, not one: `relatedFolders` (`worktree.go`) adds every other checkout of the same git repository — the main worktree and its siblings — because an agent working in a worktree still wants the context recorded in the main repo. It reads git's own files (`.git` file → `worktrees/<name>/gitdir`, `commondir`), never shells out to git, so it works with no git on PATH and on every OS. `ListOptions.SkipLinkedWorktrees` / `--no-worktrees` confines matching to the folder itself.
 
 `BuildContext` (in `context.go`) is what `load`/`update` produce: a header, the **guardrails block**, then a bounded preview (`maxPreviewChars`) per session.
 

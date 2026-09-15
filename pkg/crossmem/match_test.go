@@ -70,7 +70,7 @@ func TestFilterByCWDMatchesOnRealWorkspaceOnly(t *testing.T) {
 		{Provider: "codex", Workspace: absPath(t, "/u/m/other-repo"), Title: cwd}, // title looks like the cwd, but workspace is elsewhere
 		{Provider: "claude", Workspace: absPath(t, "/u/m/unrelated"), Title: "some sentence"},
 	}
-	got := filterByCWD(sessions, cwd)
+	got := filterByCWD(sessions, []string{cwd})
 	if len(got) != 1 {
 		t.Fatalf("expected exactly 1 match, got %d: %+v", len(got), got)
 	}

@@ -351,3 +351,70 @@ func TestClientListFollowsTranscriptSymlinks(t *testing.T) {
 		}
 	}
 }
+
+// Agents work in git worktrees, one per task. A worktree is a different path
+// but the same repository, so a session recorded in the main checkout holds the
+// context for work continuing in the worktree and must be offered there.
+func TestClientListSpansGitWorktrees(t *testing.T) {
+	repo := t.TempDir()
+	main := filepath.Join(repo, "app")             // main checkout
+	linked := filepath.Join(repo, "wt", "feature") // linked worktree
+	gitDir := filepath.Join(main, ".git")
+	entry := filepath.Join(gitDir, "worktrees", "feature")
+	for _, dir := range []string{main, linked, entry} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// git's own layout: the worktree's .git file points at the entry, and the
+	// entry points back at that .git file.
+	mustWrite(t, filepath.Join(linked, ".git"), "gitdir: "+entry+"\n")
+	mustWrite(t, filepath.Join(entry, "gitdir"), filepath.Join(linked, ".git")+"\n")
+	mustWrite(t, filepath.Join(entry, "commondir"), "../..\n")
+
+	claude := filepath.Join(t.TempDir(), "claude")
+	mustWrite(t, filepath.Join(claude, "p1", "main.jsonl"),
+		`{"type":"user","cwd":"`+jsonEscape(main)+`","message":{"content":"work in the main checkout"}}`+"\n")
+	mustWrite(t, filepath.Join(claude, "p2", "wt.jsonl"),
+		`{"type":"user","cwd":"`+jsonEscape(linked)+`","message":{"content":"work in the worktree"}}`+"\n")
+	mustWrite(t, filepath.Join(claude, "p3", "other.jsonl"),
+		`{"type":"user","cwd":"`+jsonEscape(t.TempDir())+`","message":{"content":"unrelated repo"}}`+"\n")
+
+	c := newTestClient(t, map[string]string{"claude:jsonl-projects": claude})
+	ctx := context.Background()
+
+	for _, from := range []string{linked, main} {
+		sessions, err := c.List(ctx, ListOptions{CWD: from})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sessions) != 2 {
+			t.Fatalf("from %s: want both checkouts' sessions, got %d: %#v", filepath.Base(from), len(sessions), refsIn(sessions))
+		}
+	}
+
+	only, err := c.List(ctx, ListOptions{CWD: linked, SkipLinkedWorktrees: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(only) != 1 || !strings.Contains(only[0].Path, "wt.jsonl") {
+		t.Fatalf("--no-worktrees should confine to the worktree, got %#v", refsIn(only))
+	}
+
+	// A plain directory that is not a git repository keeps the old behaviour.
+	plain := t.TempDir()
+	mustWrite(t, filepath.Join(claude, "p4", "plain.jsonl"),
+		`{"type":"user","cwd":"`+jsonEscape(plain)+`","message":{"content":"no repo here"}}`+"\n")
+	got, err := c.List(ctx, ListOptions{CWD: plain})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("non-repo folder: %v %#v", err, refsIn(got))
+	}
+}
+
+func refsIn(sessions []Session) []string {
+	out := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, filepath.Base(s.Path)+" @ "+s.Workspace)
+	}
+	return out
+}
