@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>crossmem — portable context across agent tools</title>
+<meta name="description" content="crossmem is a local-first CLI that makes agent context portable across Claude Code, Codex, Devin, Copilot and OpenCode.">
+<meta property="og:title" content="crossmem">
+<meta property="og:description" content="Portable context memory across local agent tools. Hit a limit in one tool, resume in another.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🧠</text></svg>">
+<style>
+:root{
+  --bg:#0f1115; --panel:#161a21; --line:#252b36; --fg:#e7ebf2; --mut:#9aa6b8;
+  --acc:#7cc4ff; --acc2:#9ef0c4; --code:#0b0d11;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme: light){
+  :root{--bg:#fbfcfe;--panel:#fff;--line:#e3e8ef;--fg:#131721;--mut:#5b6678;--acc:#0b63c5;--acc2:#0a7a52;--code:#f4f6fa}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:900px;margin:0 auto;padding:0 20px}
+header{border-bottom:1px solid var(--line);position:sticky;top:0;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);z-index:5}
+nav{display:flex;gap:18px;align-items:center;height:56px;font-size:14px;flex-wrap:wrap}
+nav .brand{font-family:var(--mono);font-weight:600;color:var(--fg);margin-right:auto}
+.hero{padding:64px 0 40px}
+h1{font-size:clamp(34px,6vw,52px);line-height:1.08;margin:0 0 14px;letter-spacing:-.02em}
+.lede{font-size:19px;color:var(--mut);max-width:44em;margin:0 0 26px}
+.cta{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.btn{display:inline-block;padding:10px 18px;border-radius:8px;border:1px solid var(--line);font-size:14px;color:var(--fg)}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#04121f;font-weight:600}
+@media (prefers-color-scheme: light){.btn.primary{color:#fff}}
+section{padding:36px 0;border-top:1px solid var(--line)}
+h2{font-size:24px;margin:0 0 6px;letter-spacing:-.01em}
+h3{font-size:15px;margin:22px 0 8px;font-family:var(--mono);color:var(--mut);font-weight:600}
+p{margin:0 0 14px}
+.mut{color:var(--mut)}
+pre{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto;margin:0 0 16px}
+code{font-family:var(--mono);font-size:13.5px}
+p code,li code,td code{background:var(--code);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-top:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.card h4{margin:0 0 6px;font-size:15px}
+.card p{margin:0;color:var(--mut);font-size:14.5px}
+table{width:100%;border-collapse:collapse;font-size:14.5px;margin-bottom:16px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.tag{display:inline-block;font:12px/1 var(--mono);color:var(--acc2);border:1px solid var(--line);border-radius:99px;padding:5px 10px;margin:0 6px 6px 0}
+footer{border-top:1px solid var(--line);padding:28px 0 60px;color:var(--mut);font-size:14px}
+ul{margin:0 0 14px;padding-left:20px}
+li{margin-bottom:6px}
+</style>
+</head>
+<body>
+<header><div class="wrap"><nav>
+  <span class="brand">crossmem</span>
+  <a href="#install">Install</a>
+  <a href="#resume">Resume</a>
+  <a href="#stores">Stores</a>
+  <a href="#library">Library</a>
+  <a href="#adrs">Design</a>
+  <a href="https://github.com/muthuishere/crossmemcli">GitHub</a>
+</nav></div></header>
+
+<div class="wrap">
+
+<div class="hero">
+  <h1>Your agent context, portable.</h1>
+  <p class="lede">You hit a usage limit in one tool and reopen the folder in another — and re-explain everything. <strong>crossmem</strong> reads the local session stores of Claude Code, Codex, Devin, Copilot and OpenCode, and emits one clean Markdown bundle the next agent can load. Local reads only. No telemetry.</p>
+  <div class="cta">
+    <a class="btn primary" href="#install">Install</a>
+    <a class="btn" href="https://github.com/muthuishere/crossmemcli">Source</a>
+    <a class="btn" href="https://pkg.go.dev/github.com/muthuishere/crossmemcli">Go reference</a>
+  </div>
+  <div>
+    <span class="tag">Claude Code</span><span class="tag">Codex</span><span class="tag">Devin</span><span class="tag">Copilot (VS Code + CLI)</span><span class="tag">OpenCode</span>
+  </div>
+</div>
+
+<section id="install">
+  <h2>Install</h2>
+  <h3>Homebrew</h3>
+  <pre><code>brew install muthuishere/tap/crossmem</code></pre>
+  <h3>npm</h3>
+  <pre><code>npm install -g @muthuishere/crossmem</code></pre>
+  <h3>Go</h3>
+  <pre><code>go install github.com/muthuishere/crossmemcli/cmd/crossmem@latest</code></pre>
+</section>
+
+<section id="resume">
+  <h2>Resume across tools</h2>
+  <p class="mut">One tool runs out, you reopen the <strong>same folder</strong> in another, and pick up where you left off.</p>
+<pre><code># 1. Load this folder's latest session (summary by default)
+crossmem load . --limit 1
+
+# 2. Prefer to choose? List recent sessions for THIS folder, newest first
+crossmem list . --limit 5
+#   2026-06-29T14:27  codex   ~/.codex/sessions/.../rollout-….jsonl
+#   2026-06-29T04:10  devin   devin:narrow-action
+#   2026-06-28T21:02  claude  ~/.claude/projects/.../&lt;id&gt;.jsonl
+
+# 3. Load the one you picked, by its handle
+crossmem load --session &lt;handle&gt;
+crossmem load --session &lt;handle&gt; --full</code></pre>
+  <p><code>list</code> shows each session's title plus the <strong>first and last thing you asked</strong> — a title says what a session was called, the questions say what it became. Tool output is skipped when picking them.</p>
+  <p>The session you are running inside is excluded by default, so <code>load .</code> means the <em>previous</em> session rather than handing your live conversation back to you. <code>--include-current</code> overrides it; <code>CROSSMEM_CURRENT_SESSION</code> covers tools that export no session id.</p>
+
+  <div class="grid">
+    <div class="card"><h4>Matches by real cwd</h4><p>Sessions map to folders by the working directory recorded in the transcript — dashes in folder names and all.</p></div>
+    <div class="card"><h4>Worktree aware</h4><p>A worktree also matches the main checkout and its siblings, read from git's own files. No <code>git</code> binary needed.</p></div>
+    <div class="card"><h4>Guardrails vs history</h4><p>Repo instruction files are marked authoritative; transcripts are context only. The bundle says so out loud.</p></div>
+    <div class="card"><h4>Never reads secrets</h4><p>Credential files, auth DBs, <code>*.env</code> and <code>vault/</code> are excluded by contract — including from dumps.</p></div>
+  </div>
+</section>
+
+<section id="usage">
+  <h2>Everyday commands</h2>
+<pre><code>crossmem scan                                  # discover known local context stores
+crossmem list . --limit 5                      # recent sessions for THIS folder
+crossmem list --provider claude --limit 20     # recent Claude sessions everywhere
+crossmem load .                                # context bundle for this repo
+crossmem update .                              # write durable .crossmem/ files (idempotent)
+crossmem export .                              # write .crossmem/qa.jsonl for this folder
+crossmem import . --in ~/conversations         # import qa.jsonl into this folder
+crossmem sync --remote hetzbox:companydata/convdump   # push a store dump with rclone
+crossmem config                                # where it looks, and what it found</code></pre>
+  <p><code>crossmem update .</code> writes <code>.crossmem/context.md</code>, <code>guardrails.md</code>, <code>sessions.json</code> and <code>sources.json</code> — the durable, committable form of a bundle. It carries no generated-at timestamp, so re-running produces no diff.</p>
+
+  <h3>export / import</h3>
+  <p><code>export</code> writes one <code>qa.jsonl</code> of every question, the full answer, and the tools and results in between — <strong>no agent name, no model name, no tokens</strong>.</p>
+<pre><code>{"sessionId":"…","folder":"/path","q":"…","a":"…","time":"…",
+ "messages":[{"role":"user","content":"…"},{"role":"tool","name":"Write","content":"…"}]}</code></pre>
+</section>
+
+<section id="stores">
+  <h2>Where it looks</h2>
+  <table>
+    <tr><th>Tool</th><th>Store</th></tr>
+    <tr><td>Claude Code</td><td><code>~/.claude/projects/&lt;encoded-workspace&gt;/*.jsonl</code></td></tr>
+    <tr><td>Codex</td><td><code>~/.codex/sessions/YYYY/MM/DD/*.jsonl</code></td></tr>
+    <tr><td>Copilot in VS Code</td><td><code>&lt;code-user&gt;/workspaceStorage/&lt;id&gt;/chatSessions/*.jsonl</code></td></tr>
+    <tr><td>Copilot CLI</td><td><code>~/.copilot/session-store.db</code></td></tr>
+    <tr><td>Devin (CLI + desktop)</td><td><code>~/.local/share/devin/cli/sessions.db</code></td></tr>
+    <tr><td>OpenCode</td><td><code>&lt;opencode-data&gt;/opencode*.db</code></td></tr>
+  </table>
+  <p>Every store lists all of its OS-specific candidates. <code>$CLAUDE_CONFIG_DIR</code>, <code>$CODEX_HOME</code>, <code>$DEVIN_HOME</code> and <code>$DEVIN_DB_PATH</code> win when set. Run <code>crossmem config</code> for the exact list on your machine.</p>
+  <h3>Point it somewhere else</h3>
+<pre><code>// ~/.config/crossmemcli/config.json
+{
+  "stores":      { "devin:sqlite-sessions": "D:/agents/devin/cli/sessions.db" },
+  "extraStores": { "opencode": "~/other/opencode/opencode*.db" },
+  "defaults":    { "mode": "full", "limit": 5 }
+}</code></pre>
+  <p><code>stores</code> replaces a store's built-in locations, <code>extraStores</code> adds to them. <code>~</code>, <code>%VAR%</code>, <code>$VAR</code> and globs expand; a path whose variable is unset is skipped, so one config file works on every machine. <code>crossmem config --init</code> writes a starter.</p>
+</section>
+
+<section id="library">
+  <h2>Use it as a Go library</h2>
+  <p><code>pkg/crossmem</code> is the same engine the CLI runs, with no process-global state.</p>
+<pre><code>go get github.com/muthuishere/crossmemcli@latest</code></pre>
+<pre><code>c, err := crossmem.New(crossmem.Options{})
+sessions, err := c.List(ctx, crossmem.ListOptions{CWD: root, Limit: 5})
+tr, err := c.Transcript(ctx, sessions[0].Ref)
+md, err := c.Load(ctx, sessions[0].Ref, crossmem.LoadFull)
+rules, err := c.Guardrails(root)</code></pre>
+  <p>Semver from v0.2.0; the JSON field names of <code>Session</code>, <code>Store</code>, <code>QARecord</code>, <code>Transcript</code> and <code>Event</code> are frozen. Runnable example: <code>go run ./examples/list &lt;folder&gt;</code>.</p>
+</section>
+
+<section id="skill">
+  <h2>Agent skill</h2>
+  <p>Optional global skill activation, so an agent reaches for crossmem on its own when you say “resume”:</p>
+<pre><code>crossmem install --skills      # ~/.claude/skills/ and ~/.agents/skills/
+crossmem uninstall --skills</code></pre>
+  <p class="mut">Global only, by design — crossmem is a cross-repo context layer, not a per-repo one.</p>
+</section>
+
+<section id="adrs">
+  <h2>Design decisions</h2>
+  <ul>
+    <li><a href="https://github.com/muthuishere/crossmemcli/blob/main/docs/adr/1-cross-platform-store-resolution.md">ADR 1 — cross-platform store resolution</a></li>
+    <li><a href="https://github.com/muthuishere/crossmemcli/blob/main/docs/adr/2-devin-single-sessions-db.md">ADR 2 — Devin is one <code>sessions.db</code></a></li>
+    <li><a href="https://github.com/muthuishere/crossmemcli/blob/main/docs/adr/3-public-library-api.md">ADR 3 — the public library API</a></li>
+  </ul>
+</section>
+
+<footer>
+  <p>MIT · built by <a href="https://github.com/muthuishere">muthuishere</a> · <a href="https://github.com/muthuishere/crossmemcli/issues">issues</a></p>
+  <p>crossmem sends no telemetry. Everything it does is a local read.</p>
+</footer>
+
+</div>
+</body>
+</html>

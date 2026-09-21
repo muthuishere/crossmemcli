@@ -2,7 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/muthuishere/crossmemcli.svg)](https://pkg.go.dev/github.com/muthuishere/crossmemcli)
 
-Portable context memory across local agent tools.
+Portable context memory across local agent tools. Site: [muthuishere.github.io/crossmemcli](https://muthuishere.github.io/crossmemcli/).
 
 `crossmem` discovers local Claude Code, Codex, Devin, Copilot (VS Code and CLI), and OpenCode session stores, lists available sessions, and emits a clean context bundle that can be loaded into another agent session. Go docs: [pkg.go.dev/github.com/muthuishere/crossmemcli](https://pkg.go.dev/github.com/muthuishere/crossmemcli).
 
