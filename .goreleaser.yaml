@@ -38,9 +38,13 @@ homebrew_casks:
   - name: crossmem
     binaries:
       - crossmem
+    # No tap token (a local snapshot, or a fork's CI) just means the cask is
+    # generated under dist/ and not pushed.
+    skip_upload: '{{ if envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}false{{ else }}true{{ end }}'
     repository:
       owner: muthuishere
       name: homebrew-tap
+      token: '{{ envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}'
     homepage: https://github.com/muthuishere/crossmemcli
     description: Portable context memory across local agent tools.
     license: MIT

@@ -34,3 +34,24 @@ tasks:
     desc: Dry-run GoReleaser
     cmds:
       - goreleaser release --snapshot --clean --skip=publish --verbose
+
+  release:
+    desc: 'Cut a release: task release -- 0.2.2 (syncs npm versions, tags, pushes)'
+    vars:
+      VERSION: '{{ .CLI_ARGS }}'
+    preconditions:
+      - sh: '[ -n "{{ .VERSION }}" ]'
+        msg: 'usage: task release -- 0.2.2'
+      - sh: '[ -z "$(git status --porcelain)" ]'
+        msg: 'working tree is dirty; commit or stash first'
+      - sh: '[ -z "$(git tag --list v{{ .VERSION }})" ]'
+        msg: 'tag v{{ .VERSION }} already exists'
+    cmds:
+      - task: ci
+      - ./scripts/set-version.sh {{ .VERSION }}
+      - git add npm
+      - 'git commit -m "release v{{ .VERSION }}"'
+      - git tag -a v{{ .VERSION }} -m "v{{ .VERSION }}"
+      - git push origin HEAD
+      - git push origin v{{ .VERSION }}
+      - echo "pushed v{{ .VERSION }} - the release workflow builds the GitHub release and publishes npm"
