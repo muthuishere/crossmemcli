@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLI reference — crossmem</title>
+<meta name="description" content="Every crossmem command: scan, list, load, update, guardrails, export, import, sync, config, install.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🧠</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div class="wrap"><nav>
+  <a class="brand" href="./">crossmem</a>
+  <a href="./">Overview</a>
+  <a href="cli.html" aria-current="page">CLI</a>
+  <a href="skill.html">Agent skill</a>
+  <a href="stores.html">Stores &amp; config</a>
+  <a href="https://github.com/muthuishere/crossmemcli">GitHub</a>
+</nav></div></header>
+
+<div class="wrap">
+<section>
+  <h1 class="page">CLI reference</h1>
+  <p class="lede">Ten commands. Every one of them is a local read except the four that write into a folder you name.</p>
+  <table>
+    <tr><th>Command</th><th>What it does</th></tr>
+    <tr><td><a href="#scan"><code>scan</code></a></td><td>discover local agent session stores on this machine</td></tr>
+    <tr><td><a href="#list"><code>list</code></a> <span class="mut">/ sessions</span></td><td>list available sessions across stores, newest first</td></tr>
+    <tr><td><a href="#load"><code>load</code></a> <span class="mut">/ context</span></td><td>print a portable context bundle for a repo or folder</td></tr>
+    <tr><td><a href="#update"><code>update</code></a></td><td>write the durable <code>.crossmem/</code> files</td></tr>
+    <tr><td><a href="#guardrails"><code>guardrails</code></a></td><td>print the repo's authoritative instruction files</td></tr>
+    <tr><td><a href="#export"><code>export</code></a></td><td>write <code>qa.jsonl</code> of every session (no agent/model names)</td></tr>
+    <tr><td><a href="#import"><code>import</code></a></td><td>read a <code>qa.jsonl</code> back into a folder</td></tr>
+    <tr><td><a href="#sync"><code>sync</code></a></td><td>push or pull a store dump with rclone</td></tr>
+    <tr><td><a href="#config"><code>config</code></a></td><td>show where each store is looked for, and override it</td></tr>
+    <tr><td><a href="#install"><code>install --skills</code></a></td><td>install (or remove) the global agent skill</td></tr>
+  </table>
+  <p><code>crossmem help &lt;command&gt;</code> prints the same detail in your terminal, and <code>crossmem --version</code> reports the build metadata stamped in at release.</p>
+</section>
+
+<section id="scan">
+  <h2><code>scan</code></h2>
+  <p>Discovers known local context stores without reading any transcript contents. The first thing to run when something looks missing.</p>
+<pre><code>crossmem scan
+crossmem scan --json</code></pre>
+</section>
+
+<section id="list">
+  <h2><code>list [folder]</code></h2>
+  <p>Lists local sessions, most recent first. Pass a folder — positionally or with <code>--folder</code> — to show only sessions whose <strong>real working directory</strong> is that folder, across all tools.</p>
+  <p>Each row carries the agent, how long ago it ran (“15 hours ago”), the local date/time, and the first and last question, so you can confirm which session to load before paying to load it.</p>
+<pre><code>crossmem list --limit 5                    # 5 most recent across all tools
+crossmem list . --limit 5                  # 5 most recent for THIS folder
+crossmem list --provider claude --limit 20
+crossmem list /path/to/repo --json</code></pre>
+  <table>
+    <tr><th>Flag</th><th>Meaning</th></tr>
+    <tr><td><code>--provider &lt;name&gt;</code></td><td><code>claude</code>, <code>codex</code>, <code>copilot</code>, <code>copilot-cli</code>, <code>devin</code>, <code>opencode</code>, or <code>all</code> (default)</td></tr>
+    <tr><td><code>--folder &lt;path&gt;</code></td><td>only sessions whose working directory is this folder</td></tr>
+    <tr><td><code>--limit &lt;n&gt;</code></td><td>maximum sessions to print (default 50)</td></tr>
+    <tr><td><code>--include-current</code></td><td>also show the session this process is running inside</td></tr>
+    <tr><td><code>--subagents</code></td><td>list subagent sessions as their own rows (hidden by default)</td></tr>
+    <tr><td><code>--no-worktrees</code></td><td>match only this folder, not the repo's other git worktrees</td></tr>
+    <tr><td><code>--no-questions</code></td><td>skip the first/last question lookup (faster)</td></tr>
+    <tr><td><code>--json</code></td><td>machine-readable — <code>provider</code>, <code>ago</code>, <code>modified</code>, <code>ref</code>, <code>title</code>, <code>firstQuestion</code>, <code>lastQuestion</code>, <code>workspace</code>, <code>children</code></td></tr>
+  </table>
+  <div class="note"><p><strong>The session you are in is excluded by default.</strong> Resuming your own live conversation just hands back what you already have. Detected automatically for Claude Code (<code>CLAUDE_CODE_SESSION_ID</code>), the Devin CLI (<code>DEVIN_SESSION_ID</code>) and Codex (<code>CODEX_THREAD_ID</code>). Copilot and OpenCode export no session id — set <code>CROSSMEM_CURRENT_SESSION</code> (comma-separated, works for every provider).</p></div>
+  <p>OpenCode subagent sessions are folded into the session that spawned them — the parent's JSON carries their refs as <code>children</code> — so the list shows the work you did, not every helper it ran.</p>
+</section>
+
+<section id="load">
+  <h2><code>load [folder]</code></h2>
+  <p>Prints a portable context bundle: a header, the guardrails block, then a bounded excerpt per session. The CLI extracts readable recent history and references the active instruction files; the consuming agent decides whether to summarize or ask for more.</p>
+<pre><code>crossmem load .
+crossmem load . --limit 1                  # latest session, summary
+crossmem load . --limit 1 --full           # latest session, fuller excerpt
+crossmem load --session /path/to/session.jsonl --full
+crossmem load --session devin:1a2b3c --full
+crossmem load . --out .crossmem/context.md</code></pre>
+  <table>
+    <tr><th>Flag</th><th>Meaning</th></tr>
+    <tr><td><code>--session &lt;ref&gt;</code></td><td>load one session by its handle from <code>list</code> — a transcript path, or <code>devin:</code>/<code>opencode:</code>/<code>copilot-cli:&lt;id&gt;</code></td></tr>
+    <tr><td><code>--mode &lt;summary|full&gt;</code></td><td>excerpt size; <code>--full</code> is shorthand for <code>--mode full</code></td></tr>
+    <tr><td><code>--limit &lt;n&gt;</code></td><td>maximum sessions to include (default 10)</td></tr>
+    <tr><td><code>--provider &lt;name&gt;</code></td><td>restrict to one tool</td></tr>
+    <tr><td><code>--include-current</code></td><td>include the live session</td></tr>
+    <tr><td><code>--out &lt;file&gt;</code></td><td>write to a file instead of stdout</td></tr>
+  </table>
+  <p><code>--full</code> raises the per-session budget from <strong>9,000</strong> to <strong>24,000</strong> characters. When a session does not fit, the bundle says so honestly rather than silently truncating: it keeps the opening — which states the goal — then an <code>[... middle of the session elided ...]</code> marker, then the most recent turns, which is where the work actually stopped. A single over-long turn (usually a pasted file) ends with <code>...[N chars trimmed]</code>. Treat both markers as real.</p>
+  <p class="mut">Tired of typing <code>--full</code>? <code>crossmem config --init</code>, then <code>"defaults": {"mode": "full"}</code>.</p>
+</section>
+
+<section id="update">
+  <h2><code>update [folder]</code></h2>
+  <p>The durable form of a bundle. Writes <code>&lt;folder&gt;/.crossmem/</code>:</p>
+  <table>
+    <tr><th>File</th><th>What it is</th></tr>
+    <tr><td><code>context.md</code></td><td>the portable context bundle</td></tr>
+    <tr><td><code>guardrails.md</code></td><td>the repo's active instruction file references</td></tr>
+    <tr><td><code>sessions.json</code></td><td>metadata for the sessions that were selected</td></tr>
+    <tr><td><code>sources.json</code></td><td>which stores and instruction files were discovered</td></tr>
+  </table>
+<pre><code>crossmem update .
+crossmem update /path/to/repo --provider claude --limit 5 --full</code></pre>
+  <div class="note"><p><strong>Idempotent by design.</strong> The files carry no generated-at timestamp, and a file whose content has not changed is left untouched — so re-running produces no diff, no mtime churn and no spurious commit. That is what makes <code>.crossmem/</code> safe to commit and share with a teammate.</p></div>
+</section>
+
+<section id="guardrails">
+  <h2><code>guardrails [folder]</code></h2>
+  <p>Prints the instruction files an agent must read before acting: <code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>.agents/AGENTS.md</code>, <code>.claude/CLAUDE.md</code>. <code>load</code> and <code>update</code> already embed this block in their bundles.</p>
+<pre><code>crossmem guardrails .</code></pre>
+  <p>These are <strong>authoritative</strong>. Session transcripts are <strong>context only</strong>. A decision found in a transcript that contradicts a guardrail file loses.</p>
+</section>
+
+<section id="export">
+  <h2><code>export [folder]</code></h2>
+  <p>Writes one <code>qa.jsonl</code> of every question, the full answer, and everything that happened in between — tools, results, thinking. <strong>No agent name, no model name, no tokens.</strong> This is the only export format, and <code>import</code> reads the same file back.</p>
+<pre><code>crossmem export .                    # this folder → .crossmem/qa.jsonl
+crossmem export --out ~/conversations # whole machine
+crossmem export --provider claude --json</code></pre>
+  <p>Each line:</p>
+<pre><code>{"sessionId":"…","folder":"/path","q":"…","a":"…","time":"…",
+ "messages":[{"role":"user","content":"…"},
+             {"role":"assistant","content":"…"},
+             {"role":"tool","name":"Write","content":"…"}]}</code></pre>
+  <p class="mut">Reach for it when you want a training corpus, a RAG corpus, or to carry conversations to another machine. <code>--out</code> is a destination <em>directory</em>.</p>
+</section>
+
+<section id="import">
+  <h2><code>import [folder]</code></h2>
+  <p>Reads a <code>qa.jsonl</code> written by <code>export</code>. <code>--in</code> may be the file itself or a directory containing one.</p>
+<pre><code>crossmem import --in ~/conversations              # into dumpDir
+crossmem import . --in ~/conversations            # into ./.crossmem/qa.jsonl
+crossmem import . --in ~/conversations --merge --dry-run</code></pre>
+  <p><code>--merge</code> appends pairs not already in the destination; <code>--dry-run</code> reports counts without writing. Always dry-run first when the destination already holds a corpus.</p>
+</section>
+
+<section id="sync">
+  <h2><code>sync</code></h2>
+  <p>Mirrors a <strong>store dump</strong> — the original transcripts — between machines using the <code>rclone</code> binary on <code>PATH</code>. Separate from <code>export</code>/<code>import</code>, which move a conversation corpus.</p>
+<pre><code>crossmem sync --remote hetzbox:companydata/convdump
+crossmem sync --pull --remote hetzbox:companydata/convdump
+crossmem sync --prune            # rclone sync: delete extras at the destination</code></pre>
+  <p>Set a standing remote instead of typing it every time:</p>
+<pre><code>{ "dumpDir": "~/.assets/convdump",
+  "sync": { "remote": "hetzbox:companydata/convdump" } }</code></pre>
+  <p class="mut">The dump applies the same secret filter as everything else — auth, credential, env and key material plus <code>vault/</code>, cache and <code>node_modules</code> directories never leave the machine.</p>
+</section>
+
+<section id="config">
+  <h2><code>config</code></h2>
+  <p>Shows the config file location and, for every store, the paths crossmem looks in <em>on this machine</em> and which of them exist. It is how you check a store was found and learn the exact key to override.</p>
+<pre><code>crossmem config
+crossmem config --init     # write a starter file</code></pre>
+  <p>Details and the full override syntax are on the <a href="stores.html">stores page</a>.</p>
+</section>
+
+<section id="install">
+  <h2><code>install --skills</code> / <code>uninstall --skills</code></h2>
+<pre><code>crossmem install --skills
+crossmem install --skills --agents   # force the agents target
+crossmem uninstall --skills</code></pre>
+  <p>Installs the bundled <code>crossmem-loader</code> skill into <code>~/.claude/skills/crossmem-loader</code>, and <code>~/.agents/skills/crossmem-loader</code> when <code>codex</code> is on <code>PATH</code> or <code>--agents</code> is passed. The install is atomic — temp dir, then rename. It does not create repo-local skill folders. <a href="skill.html">What the skill does →</a></p>
+</section>
+
+<section id="debug">
+  <h2>Debugging a run</h2>
+<pre><code>CROSSMEM_DEBUG=1 crossmem scan
+CROSSMEM_LOG=/tmp/crossmem.log crossmem load . --limit 5</code></pre>
+  <p>Logs include command flow and local read/query failures — never transcript contents. Because active agents may be writing these files while you read them, file and SQLite reads retry up to three times with small backoff, only on transient errors (“database is locked”, “busy”), never on missing-file or permission errors. SQLite opens are read-only with a busy timeout.</p>
+</section>
+
+<footer>
+  <p>MIT · <a href="https://github.com/muthuishere/crossmemcli">source</a> · <a href="https://pkg.go.dev/github.com/muthuishere/crossmemcli">Go reference</a></p>
+</footer>
+</div>
+</body>
+</html>
