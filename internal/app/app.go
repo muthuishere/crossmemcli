@@ -35,7 +35,7 @@ Commands:
   import [options] [folder]               import a qa.jsonl into a folder's .crossmem/
   sync [options]                          push (or pull) the dump dir with rclone
   config [options]                        show where each store is looked for, and override it
-  install --skills [options]              install the global crossmem-loader skill
+  install --skills [options]              reinstall the global crossmem-loader skill (installed automatically)
   uninstall --skills [options]            remove the global crossmem-loader skill
   help [command]                          display help for command
 
@@ -284,6 +284,11 @@ const installHelpText = `Usage: crossmem install --skills [options]
 
 Install the global crossmem-loader skill. This does not create repo-local skill folders.
 
+crossmem does this by itself the first time any command runs after an install or
+an upgrade, so this command is only needed to force it or to target one host.
+Set CROSSMEM_NO_SKILL_INSTALL=1 to turn the automatic install off; uninstalling
+the skill also stops it from coming back.
+
 Options:
   --skills                                required; installs the bundled skill
   --agents                                also target ~/.agents/skills when codex is not on PATH
@@ -301,6 +306,8 @@ Examples:
 const uninstallHelpText = `Usage: crossmem uninstall --skills [options]
 
 Remove the global crossmem-loader skill.
+
+Removing the skill also disables the automatic install, so it stays removed.
 
 Options:
   --skills                                required; removes the bundled skill
@@ -323,6 +330,9 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 	if args[0] == "help" {
 		return runHelp(args[1:], stdout)
+	}
+	if args[0] != "install" && args[0] != "uninstall" {
+		ensureSkillsInstalled(stderr)
 	}
 
 	switch args[0] {
@@ -945,6 +955,12 @@ func executeSkillAction(label string, agents bool, stdout io.Writer, stderr io.W
 	}
 	if err != nil {
 		return err
+	}
+	if strings.HasSuffix(label, "uninstall") {
+		// Keep the next command from silently putting it back.
+		writeSkillStamp(skillStampDisabled)
+	} else if fingerprint, ferr := bundledSkillFingerprint(); ferr == nil {
+		writeSkillStamp(fingerprint)
 	}
 	for _, result := range results {
 		fmt.Fprintf(stdout, "%s: %s at %s\n", result.Host, result.Action, result.Path)

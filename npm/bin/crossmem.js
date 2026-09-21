@@ -2,33 +2,23 @@
 'use strict';
 
 const { spawn } = require('child_process');
-
-const SUPPORTED = {
-  'darwin-arm64': '@muthuishere/crossmem-darwin-arm64',
-  'darwin-x64': '@muthuishere/crossmem-darwin-x64',
-  'linux-arm64': '@muthuishere/crossmem-linux-arm64',
-  'linux-x64': '@muthuishere/crossmem-linux-x64',
-  'win32-x64': '@muthuishere/crossmem-windows-x64',
-};
-
-const key = `${process.platform}-${process.arch}`;
-const pkg = SUPPORTED[key];
+const { SUPPORTED, platformPackage, resolveBinary } = require('./resolve');
 
 function fail(message) {
   process.stderr.write(`crossmem: ${message}\n`);
   process.exit(1);
 }
 
+const pkg = platformPackage();
 if (!pkg) {
-  fail(`unsupported platform ${key}. Supported: ${Object.keys(SUPPORTED).join(', ')}`);
+  fail(
+    `unsupported platform ${process.platform}-${process.arch}. ` +
+      `Supported: ${Object.keys(SUPPORTED).join(', ')}`,
+  );
 }
 
-const binName = process.platform === 'win32' ? 'crossmem.exe' : 'crossmem';
-
-let binPath;
-try {
-  binPath = require.resolve(`${pkg}/bin/${binName}`);
-} catch (_err) {
+const binPath = resolveBinary();
+if (!binPath) {
   fail(
     `platform package ${pkg} is not installed. Reinstall with: ` +
       `npm install -g @muthuishere/crossmem`,
