@@ -31,6 +31,7 @@ Thin entrypoint → command dispatch → providers core.
 - `cmd/crossmem/main.go` — calls `app.Run(args, stdout, stderr)`. All logic is in packages so it's testable; `main` only wires stdio and exit codes.
 - `internal/app` — CLI surface. `app.go` holds the hand-rolled command dispatch (no cobra), the embedded help text constants, and flag parsing per subcommand via `flag.FlagSet`. `extractPositionalFolder` lets a folder arg appear anywhere among flags (e.g. `load --limit 5 .`). Commands: `scan`, `list`/`sessions`, `load`/`context`, `update`, `guardrails`, `export`, `import`, `sync`, `config`, `install`/`uninstall --skills`.
 - `pkg/crossmem` — the engine, and a public Go library ([ADR 3](docs/adr/3-public-library-api.md)). This is where almost all real work happens. `client.go` is the embedding API: `New(Options)` → `List`/`Load`/`Transcript`/`Guardrails`/`Scan`. **No process-global state** — config, current-session ids, and the debug writer live on the `Client`; every stateful function is a method on `*Client`. The package-level functions the CLI calls (`ListSessions`, `BuildContext`, …) are thin wrappers in `default.go` over a lazily-built default client, the only process-wide state left; `ResetConfig` drops it for tests. Public methods bind a per-call `ctx` via `c.with(ctx)` and long loops check `c.canceled()`. `convexport.go` / `transcript.go` are `export`/`import`: one `qa.jsonl` of full Q&A plus tools/results (`sessionId`, `folder`, `q`, `a`, `time`, `messages`) with no agent, model, or token fields. `dump.go` (`ExportDump`/`ImportDump`/`SyncDump`) is only used by `sync` to rclone original stores.
+- Skill install is **automatic**: `ensureSkillsInstalled` (`internal/app/autoskill.go`) runs at the top of `app.Run` for every command but `install`/`uninstall`, and installs the bundled skill into `~/.claude/skills` **and** `~/.agents/skills` unless the stamp at `~/.config/crossmemcli/skills.stamp` already matches a fingerprint of the embedded skill tree plus `version.Version`. `uninstall --skills` writes `disabled` into the stamp so a removed skill stays removed; `CROSSMEM_NO_SKILL_INSTALL=1` turns it off (the app tests set it in `TestMain`, since `Run` would otherwise write to the developer's real home). npm gets the same effect at install time through `npm/bin/postinstall.js`, which resolves the platform binary via `npm/bin/resolve.js` and always exits 0.
 - `pkg/skillinstall` — installs any agent skill directory from an `fs.FS` into `~/.claude/skills` and optionally `~/.agents/skills`, atomically (temp dir → rename). Rejects skill names that are not a single path segment, because it `RemoveAll`s `<dir>/<name>`.
 - `skills/` — the **only** copy of the bundled `crossmem-loader` skill: embedded by `skills/skills.go` (`skills.FS`) for `crossmem install --skills`, and at the top level where skill registries look.
 - `internal/diag` — env-gated debug logging (`CROSSMEM_DEBUG`, `CROSSMEM_LOG`) for the CLI entrypoint only; the library logs through `Options.Debug`. Never logs transcript contents.
@@ -84,13 +85,23 @@ Because active agents may be writing these files concurrently, reads use `withRe
 
 `crossmem update <folder>` writes `<folder>/.crossmem/`: `context.md`, `guardrails.md`, `sessions.json`, `sources.json`. This is the durable, committable form of a bundle.
 
+## Site
+
+`site/` is an **Astro** static site (`npm run dev` / `npm run build`; output `site/dist`, gitignored), deployed by `.github/workflows/pages.yml` on pushes to `main` touching `site/**`. Pages live in `src/pages/*.astro` over `src/layouts/Base.astro`, with `src/components/{Term,Card}.astro` and one `src/styles/global.css`. `astro.config.mjs` sets `base: '/crossmemcli'` (project page) and `build.format: 'file'`, so links are written as `base + '/cli'`, never hardcoded.
+
+Two rules the hand-written HTML kept getting wrong: **braces inside a template are Astro expressions** — put brace-bearing samples (JSON, Go literals) in a frontmatter template string and render `{name}`, or escape with `&#123;`; and inside `.steps`, a step's title is an `<h3>`, never a `<strong>` (the CSS makes list headings block-level, which turned inline bold text into stray line breaks). `pre` is pinned to `white-space: pre` so a transcript never reflows.
+
+Design: black background, phosphor-green accent, mono chrome, dark only — no light-mode block, on purpose. Skill-first framing: installing the CLI installs the skill, and `install --skills` is presented as an escape hatch.
+
 ## Distribution
 
 Three channels, all built by GoReleaser from one Go binary:
 
 - **Go**: `go install github.com/muthuishere/crossmemcli/cmd/crossmem@latest`
 - **npm**: `@muthuishere/crossmem` is a thin JS launcher (`npm/`) that resolves a prebuilt platform package (`@muthuishere/crossmem-<os>-<arch>`), like `windowctl`. Publishing is via GitHub Actions OIDC trusted publishing (`.github/workflows/npm-publish.yml`): **platform packages publish first, the root `@muthuishere/crossmem` last.** When adding npm packages, configure the same trusted publisher for each.
-- **Homebrew**: tap cask generated under `dist/homebrew/`.
+- **Homebrew**: tap cask, pushed to `muthuishere/homebrew-tap` when `HOMEBREW_TAP_GITHUB_TOKEN` is set and generated under `dist/homebrew/` otherwise (`skip_upload` template in `.goreleaser.yaml`, so a local `task snapshot` needs no token).
+
+Cutting a release is one command — `task release -- 0.2.2` — which runs CI, writes the version into every npm package (`scripts/set-version.sh`), commits, tags `v0.2.2` and pushes. The tag drives `.github/workflows/npm-publish.yml`: tests, `goreleaser release --clean` (GitHub release + cask + the binaries the npm packages wrap), then `scripts/npm-publish-oidc.sh`. **Keep that workflow's filename** — npm's trusted-publisher record names the file. See [docs/releasing.md](docs/releasing.md).
 
 <!-- ctx-optimize:begin -->
 <ctx-optimize>

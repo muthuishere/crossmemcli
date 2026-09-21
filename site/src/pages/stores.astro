@@ -1,0 +1,108 @@
+---
+import Base from '../layouts/Base.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const snip0 = `{
+  "defaults": { "mode": "full", "limit": 5 },
+  "stores": {
+    "devin:sqlite-sessions": "D:/agents/devin/cli/sessions.db",
+    "claude": ["~/work/.claude/projects"]
+  },
+  "extraStores": {
+    "opencode": "~/other/opencode/opencode*.db"
+  },
+  "dumpDir": "~/.assets/convdump",
+  "sync": { "remote": "hetzbox:companydata/convdump" }
+}`;
+---
+<Base page="stores" title="Stores & config — crossmem" description="Where every agent tool keeps its sessions on macOS, Linux and Windows, and how to point crossmem somewhere else.">
+<nav>
+  <a class="brand" href="./">crossmem</a>
+  <a href="./">Overview</a>
+  <a href={base + "/cli"}>CLI</a>
+  <a href={base + "/skill"}>Agent skill</a>
+  <a href={base + "/stores"} aria-current="page">Stores &amp; config</a>
+  <a href="https://github.com/muthuishere/crossmemcli">GitHub</a>
+</nav></div></header>
+
+<div class="wrap">
+<section>
+  <h1 class="page">Stores &amp; config</h1>
+  <p class="lede">Two fundamentally different store shapes — JSONL files on disk, and SQLite databases — unified behind one session list. Here is every one of them, and what to do when yours lives somewhere else.</p>
+  <p><code>crossmem config</code> prints this for <em>your</em> machine, including which candidates actually exist. Start there before believing any table.</p>
+</section>
+
+<section id="table">
+  <h2>What it reads</h2>
+  <table>
+    <tr><th>Tool</th><th>Store</th><th>Shape</th></tr>
+    <tr><td>Claude Code</td><td><code>~/.claude/projects/&lt;encoded-workspace&gt;/*.jsonl</code></td><td>JSONL</td></tr>
+    <tr><td>Codex</td><td><code>~/.codex/sessions/YYYY/MM/DD/*.jsonl</code></td><td>JSONL</td></tr>
+    <tr><td>Codex</td><td><code>~/.codex/logs_2.sqlite</code>, <code>~/.codex/history.jsonl</code></td><td>logs, prompt history</td></tr>
+    <tr><td>Copilot in VS Code</td><td><code>&lt;code-user&gt;/workspaceStorage/&lt;id&gt;/chatSessions/*.jsonl</code></td><td>VS Code journal</td></tr>
+    <tr><td>Copilot in VS Code</td><td><code>&lt;code-user&gt;/workspaceStorage/&lt;id&gt;/GitHub.copilot-chat/transcripts/*.jsonl</code></td><td>JSONL</td></tr>
+    <tr><td>Copilot CLI</td><td><code>~/.copilot/session-store.db</code></td><td>SQLite</td></tr>
+    <tr><td>Devin (CLI + desktop)</td><td><code>~/.local/share/devin/cli/sessions.db</code></td><td>SQLite</td></tr>
+    <tr><td>OpenCode</td><td><code>&lt;opencode-data&gt;/opencode*.db</code></td><td>SQLite</td></tr>
+  </table>
+  <p>Claude encodes the working directory into a project directory name; every VS Code fork records it in <code>workspaceStorage/&lt;id&gt;/workspace.json</code>; the SQLite stores keep it in a column. Either way, a session is matched to a folder by the <strong>real cwd it recorded</strong>, so a folder whose name contains a dash still resolves correctly.</p>
+  <div class="note"><p><strong>The Devin desktop app has no separate store.</strong> It drives the Devin CLI through an ACP connector, so every session — desktop or terminal-driven — lands in the one <code>sessions.db</code> under the <code>devin</code> provider. A <code>devin-gui</code> provider and an encrypted Cascade store were both removed once this was verified against a real install. <a href="https://github.com/muthuishere/crossmemcli/blob/main/docs/adr/2-devin-single-sessions-db.md">ADR 2</a>.</p></div>
+  <p class="mut">Devin's <code>~/.local/share/devin/credentials.toml</code> sits right beside the session database and is <strong>deliberately never read</strong>. Nor is any sibling <code>auth.json</code>, <code>auth.db</code> or credential table.</p>
+</section>
+
+<section id="platforms">
+  <h2>Per-platform locations</h2>
+  <table>
+    <tr><th>Placeholder</th><th>macOS</th><th>Linux</th><th>Windows</th></tr>
+    <tr><td><code>&lt;devin-cli&gt;</code></td><td><code>~/.local/share/devin/cli</code></td><td><code>~/.local/share/devin/cli</code></td><td><code>%APPDATA%\devin\cli</code></td></tr>
+    <tr><td><code>&lt;opencode-data&gt;</code></td><td><code>~/.local/share/opencode</code></td><td><code>~/.local/share/opencode</code></td><td><code>%APPDATA%\opencode</code></td></tr>
+    <tr><td><code>&lt;code-user&gt;</code></td><td><code>~/Library/Application Support/Code/User</code></td><td><code>~/.config/Code/User</code></td><td><code>%APPDATA%\Code\User</code></td></tr>
+  </table>
+  <p>Claude Code, Codex and the Copilot CLI use the same <code>~</code>-relative path on every platform. <code>%LOCALAPPDATA%</code> and <code>$XDG_DATA_HOME</code> are checked too.</p>
+  <h3>Environment variables that win</h3>
+  <table>
+    <tr><th>Variable</th><th>Effect</th></tr>
+    <tr><td><code>$CLAUDE_CONFIG_DIR</code></td><td>relocated Claude config dir — checked <em>before</em> the default</td></tr>
+    <tr><td><code>$CODEX_HOME</code></td><td>relocated Codex home — checked before the default</td></tr>
+    <tr><td><code>$DEVIN_HOME</code></td><td>relocated Devin data dir</td></tr>
+    <tr><td><code>$DEVIN_DB_PATH</code></td><td>points straight at the Devin database file</td></tr>
+    <tr><td><code>$CROSSMEM_CONFIG</code></td><td>use a different crossmem config file</td></tr>
+    <tr><td><code>$CROSSMEM_CURRENT_SESSION</code></td><td>comma-separated session ids to exclude as “live”</td></tr>
+    <tr><td><code>$CROSSMEM_DEBUG</code> / <code>$CROSSMEM_LOG</code></td><td>opt-in local debug logging</td></tr>
+  </table>
+  <p class="mut">A candidate path whose variable is unset on the current machine simply drops out — which is how a Windows-only location disappears on macOS without a single <code>runtime.GOOS</code> branch. <a href="https://github.com/muthuishere/crossmemcli/blob/main/docs/adr/1-cross-platform-store-resolution.md">ADR 1</a>.</p>
+</section>
+
+<section id="override">
+  <h2>Pointing it somewhere else</h2>
+  <p>crossmem already knows the standard locations. The config file is for what it cannot know: a portable install, a second drive, a custom data directory.</p>
+  <p><code>~/.config/crossmemcli/config.json</code> — or wherever <code>$CROSSMEM_CONFIG</code> says. <code>crossmem config --init</code> writes a starter.</p>
+<pre><code>{snip0}</code></pre>
+  <ul>
+    <li><code>defaults</code> sets what happens with no flag. A command-line flag always wins, so <code>"mode": "full"</code> means you never type <code>--full</code> again.</li>
+    <li><code>stores</code> <strong>replaces</strong> a store's built-in locations; <code>extraStores</code> <strong>keeps</strong> them and adds more.</li>
+    <li>Keys are <code>provider:kind</code> as printed by <code>crossmem scan</code>, or a bare <code>provider</code> for that provider's primary store — so overriding <code>devin</code> cannot accidentally repoint <code>devin:cli-logs</code> at a database file.</li>
+    <li>Values are a path or a list of them. <code>~</code>, <code>%VAR%</code>, <code>$VAR</code> and <code>*</code> globs expand, and a path whose variable is unset is skipped — so one config file can be shared across machines.</li>
+    <li>An unknown key is a load error, surfaced by <code>crossmem config</code> rather than silently ignored.</li>
+  </ul>
+</section>
+
+<section id="troubleshooting">
+  <h2>“It can't find my sessions”</h2>
+  <ol>
+    <li><code>crossmem scan</code> — is the store discovered at all?</li>
+    <li><code>crossmem config</code> — which candidate paths were checked, and which exist?</li>
+    <li>Relocated install? Set the env var above, or add a <code>stores</code> override.</li>
+    <li>Sessions exist but not for <em>this</em> folder? The match is on the recorded cwd — try <code>crossmem list --provider &lt;tool&gt; --limit 20</code> with no folder and read the <code>workspace</code> column.</li>
+    <li>Still nothing? <code>CROSSMEM_DEBUG=1 crossmem scan</code> reports the local read and query failures (never transcript contents).</li>
+  </ol>
+</section>
+
+<section id="safety">
+  <h2>What is never read</h2>
+  <ul>
+    <li><code>*.env</code>, credential files, auth databases, credential tables, and <code>vault/</code> directories.</li>
+    <li>The same filter runs over <code>export</code> and the <code>sync</code> dump, so a dump pushed to a remote cannot carry a secret value. Cache and <code>node_modules</code> directories are dropped too.</li>
+    <li>Nothing is sent anywhere. crossmem has no network path except the <code>rclone</code> remote you name yourself in <code>sync</code>.</li>
+  </ul>
+</section>
+</Base>

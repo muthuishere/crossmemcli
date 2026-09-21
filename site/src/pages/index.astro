@@ -1,0 +1,151 @@
+---
+import Base from '../layouts/Base.astro';
+import Term from '../components/Term.astro';
+import Card from '../components/Card.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const tools = ['Claude Code', 'Codex', 'Devin', 'Copilot · VS Code', 'Copilot · CLI', 'OpenCode'];
+
+const demo = `$ crossmem list . --limit 3
+1. claude · 15 hours ago · export conversations as q&a
+2. codex  · 2 days ago   · windows store paths
+3. devin  · 4 days ago   · devin desktop uses one sessions.db
+
+$ crossmem load --session <ref> --full
+# guardrails: AGENTS.md, CLAUDE.md   authoritative
+# session:    the transcript          context only`;
+
+const escapes = `crossmem install --skills --agents      # force it
+crossmem uninstall --skills --agents    # remove it, and stop it coming back
+CROSSMEM_NO_SKILL_INSTALL=1 crossmem …  # skip it for this run`;
+
+const lib = `c, err := crossmem.New(crossmem.Options{})
+sessions, err := c.List(ctx, crossmem.ListOptions{CWD: root, Limit: 5})
+tr, err := c.Transcript(ctx, sessions[0].Ref)
+md, err := c.Load(ctx, sessions[0].Ref, crossmem.LoadFull)
+rules, err := c.Guardrails(root)`;
+
+const adrs = [
+  ['1-cross-platform-store-resolution', 'ADR 1 — cross-platform store resolution', 'every store lists all its OS candidates in one place, with no runtime.GOOS branching.'],
+  ['2-devin-single-sessions-db', 'ADR 2 — Devin is one sessions.db', 'the desktop app drives the CLI over an ACP connector, so there is no separate desktop store.'],
+  ['3-public-library-api', 'ADR 3 — the public library API', 'what pkg/crossmem freezes, and why it keeps no process-global state.'],
+];
+---
+<Base
+  page="index"
+  title="crossmem — portable context across your agent tools"
+  description="A local-first CLI and an agent skill that make your context portable across Claude Code, Codex, Devin, Copilot and OpenCode.">
+
+<section class="hero">
+  <h1>Stop re-explaining your work to the next agent.</h1>
+  <p class="lede">You hit a usage limit in Codex, reopen the folder in Claude Code, and spend twenty minutes rebuilding context you already paid for. <strong>crossmem</strong> reads the session stores those tools already keep on your disk and hands the next one a clean brief. Installing it installs the agent skill too — so your agent does this without being asked.</p>
+  <div class="cta">
+    <a class="btn primary" href="#install">Install</a>
+    <a class="btn" href={base + '/skill'}>The agent skill</a>
+    <a class="btn" href="https://github.com/muthuishere/crossmemcli">Source</a>
+  </div>
+  <Term title="~/code/myrepo">{demo}</Term>
+  <div>{tools.map((t) => <span class="tag">{t}</span>)}</div>
+</section>
+
+<section id="halves">
+  <h2>Two halves, one idea</h2>
+  <p>Every agent tool writes its conversations to disk in its own shape — JSONL here, SQLite there. That history is <em>yours</em>, it is already local, and no tool will read another's. crossmem is the layer that does.</p>
+  <div class="two">
+    <Card title="The skill — what your agent reaches for">
+      <p><code>crossmem-loader</code> ships inside the CLI and installs itself alongside it. It teaches your agent when to recover context, how to show you the candidates and <em>wait for you to pick</em>, and how to turn a raw transcript into a brief.</p>
+      <p><a href={base + '/skill'}>How the skill works →</a></p>
+    </Card>
+    <Card title="The CLI — deterministic plumbing">
+      <p><code>crossmem</code> finds a folder's sessions across every tool, ranks them newest-first, and prints the conversation as Markdown. It decides nothing about meaning. Never guesses, never summarizes, never phones home.</p>
+      <p><a href={base + '/cli'}>Full command reference →</a></p>
+    </Card>
+  </div>
+  <div class="note"><p>The split is deliberate: summarization policy belongs to the consuming agent, not to a CLI — different agents and tasks need different amounts of history. The CLI stays the honest source; the skill brings the judgment.</p></div>
+</section>
+
+<section id="install">
+  <h2>Install</h2>
+  <div class="two">
+    <Card title="Homebrew"><pre><code>brew install muthuishere/tap/crossmem</code></pre></Card>
+    <Card title="npm"><pre><code>npm install -g @muthuishere/crossmem</code></pre></Card>
+  </div>
+  <pre><code>go install github.com/muthuishere/crossmemcli/cmd/crossmem@latest</code></pre>
+
+  <h3>The skill comes with it — nothing else to run</h3>
+  <p>However you install crossmem, <code>crossmem-loader</code> lands in <code>~/.claude/skills/</code> <em>and</em> <code>~/.agents/skills/</code>. A CLI your agent doesn't know about is only half installed, so this is not a second step: npm does it in <code>postinstall</code>, every other channel does it on the first command after an install or upgrade, and a new version refreshes it automatically.</p>
+  <p class="mut">Global only, by design — crossmem is a cross-repo layer. It never fails a command: an unwritable home directory prints one line and carries on.</p>
+  <pre><code>{escapes}</code></pre>
+</section>
+
+<section id="flow">
+  <h2>The hot path</h2>
+  <p class="mut">Because the skill is already installed, you say “resume” and your agent runs this. By hand, it is three commands.</p>
+  <ol class="steps">
+    <li>
+      <h3>See what exists for this folder</h3>
+      <pre><code>crossmem list . --limit 5</code></pre>
+      <p class="mut">Each row is the agent, how long ago it ran, and — the part that distinguishes two sessions in one folder — the <strong>first and last thing you asked</strong>. The first question is the goal; the last is where work stopped. Tool output is skipped when picking them, because agents record their own shell results as user turns.</p>
+    </li>
+    <li>
+      <h3>Load the one you picked</h3>
+      <pre><code>crossmem load --session &lt;ref&gt; --full</code></pre>
+      <p class="mut">The ref is the handle from <code>list</code> — a transcript path, or <code>devin:&lt;id&gt;</code> / <code>opencode:&lt;id&gt;</code> / <code>copilot-cli:&lt;id&gt;</code>. Loading is identical whether that session lived in a JSONL file or a database.</p>
+    </li>
+    <li>
+      <h3>Persist it so nobody pays twice</h3>
+      <pre><code>crossmem update .</code></pre>
+      <p class="mut">Writes a committable <code>.crossmem/</code> — <code>context.md</code>, <code>guardrails.md</code>, <code>sessions.json</code>, <code>sources.json</code>. Idempotent: no generated-at timestamp, unchanged files untouched, so re-running makes no diff.</p>
+    </li>
+  </ol>
+</section>
+
+<section id="design">
+  <h2>Four decisions worth knowing</h2>
+  <div class="grid">
+    <Card title="Guardrails ≠ history"><p>Repo instruction files (<code>AGENTS.md</code>, <code>CLAUDE.md</code>) are marked <strong>authoritative</strong>. Transcripts are <strong>context only</strong> — what happened, never what you must do. When they conflict, the guardrail wins, and the bundle says so.</p></Card>
+    <Card title="It matches by real cwd"><p>A session maps to a folder by the working directory recorded inside its transcript, not a name guess. Dashes in folder names, relocated configs, encoded project dirs: all handled.</p></Card>
+    <Card title="Worktrees are the same repo"><p>An agent works one worktree per task, but the context often lives in the main checkout. A folder also matches its repo's other worktrees — read from git's own files, so no <code>git</code> binary is needed.</p></Card>
+    <Card title="Your live session is excluded"><p><code>load .</code> means the <em>previous</em> session, not a mirror of the conversation you're in. Detected automatically for Claude Code, Codex and the Devin CLI; <code>CROSSMEM_CURRENT_SESSION</code> covers the rest.</p></Card>
+  </div>
+</section>
+
+<section id="safety">
+  <h2>Read-safety is a contract</h2>
+  <p>This tool reads other tools' private stores, so the boundary is written into the code and the docs both:</p>
+  <ul>
+    <li>Credential files, auth databases, <code>*.env</code> and <code>vault/</code> directories are <strong>never read</strong> — Devin's <code>credentials.toml</code> sits next to the session DB and is deliberately skipped.</li>
+    <li>The same filter applies to dumps, so a <code>sync</code> pushed to a remote cannot carry a secret.</li>
+    <li><code>export</code> writes a nameless corpus: no agent name, no model name, no tokens.</li>
+    <li>No telemetry. Every operation is a local read; debug logging is opt-in and never logs transcript contents.</li>
+  </ul>
+</section>
+
+<section id="library">
+  <h2>Also a Go library</h2>
+  <p><code>pkg/crossmem</code> is the same engine the CLI runs, with no process-global state — so a Go orchestrator can link it instead of shelling out to whatever <code>crossmem</code> is on <code>PATH</code>.</p>
+  <pre><code>{lib}</code></pre>
+  <p>Semver from v0.2.0; the JSON field names of <code>Session</code>, <code>Store</code>, <code>QARecord</code>, <code>Transcript</code> and <code>Event</code> are frozen. <a href="https://pkg.go.dev/github.com/muthuishere/crossmemcli">Go reference</a>.</p>
+</section>
+
+<section id="adrs">
+  <h2>Design records</h2>
+  <ul>
+    {adrs.map(([slug, title, why]) => (
+      <li><a href={`https://github.com/muthuishere/crossmemcli/blob/main/docs/adr/${slug}.md`}>{title}</a> — {why}</li>
+    ))}
+  </ul>
+</section>
+
+</Base>
+
+<style is:global>
+  .hero{padding:88px 0 54px}
+  .cta{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:30px}
+  .btn{display:inline-block;padding:11px 20px;border:1px solid var(--line2);
+    font:13px/1.2 var(--mono);color:var(--fg);transition:.15s}
+  .btn:hover{border-color:var(--acc);color:var(--acc)}
+  .btn.primary{background:var(--acc);border-color:var(--acc);color:#000;font-weight:700}
+  .btn.primary:hover{background:var(--dim);border-color:var(--dim)}
+  @media (max-width:640px){.hero{padding:56px 0 36px}}
+</style>

@@ -1,0 +1,59 @@
+---
+import '../styles/global.css';
+const { title, description, page } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const nav = [
+  ['', 'Overview', 'index'],
+  ['/cli', 'CLI', 'cli'],
+  ['/skill', 'Agent skill', 'skill'],
+  ['/stores', 'Stores & config', 'stores'],
+];
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{title}</title>
+<meta name="description" content={description} />
+<meta property="og:title" content={title} />
+<meta property="og:description" content={description} />
+<meta property="og:type" content="website" />
+<meta name="theme-color" content="#000000" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='black'/><text y='24' x='4' font-size='22' fill='%2300ff9c' font-family='monospace'>%3E_</text></svg>" />
+</head>
+<body>
+<header><div class="wrap"><nav>
+  <a class="brand" href={base + '/'}>crossmem</a>
+  {nav.map(([href, label, id]) => (
+    <a href={base + (href || '/')} aria-current={page === id ? 'page' : undefined}>{label}</a>
+  ))}
+  <a href="https://github.com/muthuishere/crossmemcli">GitHub</a>
+</nav></div></header>
+
+<main class="wrap"><slot /></main>
+
+<footer><div class="wrap">
+  <p>MIT · built by <a href="https://github.com/muthuishere">muthuishere</a> · <a href="https://github.com/muthuishere/crossmemcli/issues">issues</a> · <a href="https://pkg.go.dev/github.com/muthuishere/crossmemcli">pkg.go.dev</a></p>
+  <p>crossmem sends no telemetry. Everything it does is a local read.</p>
+</div></footer>
+</body>
+</html>
+
+<style is:global>
+  header{position:sticky;top:0;z-index:5;border-bottom:1px solid var(--line);
+    background:rgba(0,0,0,.84);backdrop-filter:blur(12px)}
+  nav{display:flex;gap:22px;align-items:center;min-height:58px;flex-wrap:wrap;padding:8px 0;
+    font:13px/1 var(--mono);letter-spacing:.02em}
+  nav a{color:var(--mut);border:0}
+  nav a:hover{color:var(--fg)}
+  nav .brand{margin-right:auto;color:var(--fg);font-size:15px;font-weight:600}
+  nav .brand::before{content:"▍";color:var(--acc);margin-right:7px}
+  nav a[aria-current="page"]{color:var(--acc)}
+  main section{padding:46px 0;border-top:1px solid var(--line)}
+  main section:first-of-type{border-top:0}
+  footer{border-top:1px solid var(--line);padding:34px 0 76px;margin-top:26px;
+    color:var(--mut);font:13px/1.8 var(--mono)}
+  footer a{color:var(--mut);border-bottom-color:var(--line2)}
+  footer a:hover{color:var(--acc)}
+</style>

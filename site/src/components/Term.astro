@@ -1,0 +1,16 @@
+---
+/** A terminal block. `title` is the shell's cwd; the default slot is raw text. */
+const { title = '~' } = Astro.props;
+---
+<div class="term">
+  <div class="bar">{title}</div>
+  <pre><code><slot /></code></pre>
+</div>
+
+<style>
+  .term{background:var(--code);border:1px solid var(--line);margin:0 0 26px;overflow:hidden}
+  .bar{display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--line);
+    font:11px/1 var(--mono);color:var(--mut);letter-spacing:.08em}
+  .bar::before{content:"";width:8px;height:8px;border-radius:99px;background:var(--acc);box-shadow:0 0 8px var(--acc)}
+  .term pre{border:0;margin:0;background:transparent;padding:16px 18px;line-height:1.75}
+</style>

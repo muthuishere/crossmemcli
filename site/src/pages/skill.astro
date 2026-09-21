@@ -1,0 +1,90 @@
+---
+import Base from '../layouts/Base.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+---
+<Base page="skill" title="The crossmem-loader agent skill — crossmem" description="crossmem-loader teaches your agent when to recover context, how to let you pick the session, and how to turn a transcript into a brief.">
+<nav>
+  <a class="brand" href="./">crossmem</a>
+  <a href="./">Overview</a>
+  <a href={base + "/cli"}>CLI</a>
+  <a href={base + "/skill"} aria-current="page">Agent skill</a>
+  <a href={base + "/stores"}>Stores &amp; config</a>
+  <a href="https://github.com/muthuishere/crossmemcli">GitHub</a>
+</nav></div></header>
+
+<div class="wrap">
+<section>
+  <h1 class="page">The <code>crossmem-loader</code> skill</h1>
+  <p class="lede">The CLI knows where your history is. The skill knows what to do about it — when to reach for it, how to let you choose, and how to turn a raw transcript into something worth resuming into.</p>
+  <p><strong>You do not install it.</strong> It ships inside the CLI and lands in <code>~/.claude/skills/crossmem-loader</code> and <code>~/.agents/skills/crossmem-loader</code> the moment crossmem is installed — <code>postinstall</code> on npm, first command on Homebrew, <code>go install</code> or a downloaded binary. Any agent that reads <code>SKILL.md</code> picks it up from there, and an upgrade refreshes it.</p>
+<pre><code>crossmem install --skills --agents     # force a reinstall
+crossmem uninstall --skills --agents   # remove it, and stop it coming back
+CROSSMEM_NO_SKILL_INSTALL=1 crossmem … # skip it for this run</code></pre>
+  <p class="mut">A stamp at <code>~/.config/crossmemcli/skills.stamp</code> records what was installed, so after the first run the check costs one small file read. <code>$CLAUDE_SKILLS_DIR</code> and <code>$AGENTS_SKILLS_DIR</code> relocate the targets.</p>
+</section>
+
+<section id="triggers">
+  <h2>When your agent reaches for it</h2>
+  <p>The skill's description is written so an agent invokes it <strong>before</strong> listing or reading files — guessing at prior context wastes exactly the tokens crossmem exists to save.</p>
+  <div class="grid">
+    <div class="card"><h4>Resuming</h4><p>“pick up where I left off”, “where did I leave off”, “catch me up on this folder”, “I hit a usage limit in Codex”, “import my Claude memory”.</p></div>
+    <div class="card"><h4>Persisting</h4><p>“save this context”, “write it down”, “commit the context”, “so the next session doesn't re-pay for this”.</p></div>
+    <div class="card"><h4>Export / import</h4><p>“dump every conversation”, “training corpus”, “RAG corpus”, “carry conversations to another machine”, “no model names”.</p></div>
+    <div class="card"><h4>Diagnosing</h4><p>“crossmem can't see my Devin sessions”, “no sessions found”, “where does it look for X”, “my tool keeps its sessions somewhere else”.</p></div>
+  </div>
+</section>
+
+<section id="loadflow">
+  <h2>The load flow</h2>
+  <p>The skill's hot path, and the reason it exists as a skill rather than a flag.</p>
+  <ol class="steps">
+    <li><h3>List this folder's recent sessions</h3>
+      <p class="mut"><code>crossmem list . --limit 5</code>, or <code>--json</code> to pick programmatically. If the folder is a git worktree, sessions from the repository's other checkouts come too — that is usually where the work being resumed was actually done, and each row's <code>workspace</code> shows which checkout it came from.</p>
+    </li>
+    <li><h3>Show them, then ask — never auto-load</h3>
+      <p class="mut">A numbered list in agent · recency · summary shape, then a confirm:</p>
+<pre><code>1. claude · 15 hours ago · export conversations as q&amp;a
+2. codex  · 2 days ago   · windows store paths
+
+"There's a claude session from 15 hours ago: export conversations
+ as q&amp;a. Load it?"</code></pre>
+      <p class="mut">The skill waits for a yes, a number, or a summary. <code>lastQuestion</code> is the strongest content signal — it points at unfinished work; <code>firstQuestion</code> is the goal. Recency labels the row; it is not a reason to pick on your behalf. <strong>Guessing wrong costs you a whole reconstructed context</strong>, which is the one failure this tool is supposed to prevent.</p>
+    </li>
+    <li><h3>Load the chosen session in full</h3>
+      <p class="mut"><code>crossmem load --session &lt;ref&gt; --full</code>. The skill passes <code>--full</code> explicitly even when your config already sets it, so its behavior never depends on your machine's defaults.</p>
+    </li>
+    <li><h3>Write the brief — the filtering step</h3>
+      <p class="mut">Ignore the harness boilerplate: <code>CLAUDE.md</code>/<code>AGENTS.md</code> blocks, <code>&lt;system-reminder&gt;</code>, command hooks, previously-pasted bundles, and the agent's own narration about loading crossmem. From the real work left over, synthesize <strong>role</strong> · <strong>decisions</strong> (built, chosen, <em>rejected</em>, and why) · <strong>current state</strong>.</p>
+      <p class="mut">Weight the <strong>tail</strong> for current state and open threads, the <strong>head</strong> for the original goal. Where they conflict the tail wins — it is the later decision. State what is unfinished explicitly; that is what you are resuming into.</p>
+    </li>
+    <li><h3>Offer to persist it</h3>
+      <p class="mut">If the work continues past this session, <code>crossmem update .</code> writes a committable <code>.crossmem/</code> so the next session — yours, another tool's, or a teammate's — starts from the brief instead of paying to rebuild it.</p>
+    </li>
+  </ol>
+  <div class="note"><p>When <code>.crossmem/context.md</code> already exists, the skill reads it <strong>before</strong> running <code>list</code>/<code>load</code>: a curated brief costs one file read where a full load costs a whole transcript. It falls through to the load flow when the brief is missing, stale against what you're describing, or too thin to act on.</p></div>
+</section>
+
+<section id="honesty">
+  <h2>What it is told never to do</h2>
+  <ul>
+    <li><h3>Never invent the elided middle.</h3> When the bundle's <code>[... middle of the session elided ...]</code> marker plainly hides a decision the tail refers back to, the skill says so and asks, or narrows with <code>--provider</code> — it does not reconstruct the missing reasoning.</li>
+    <li><h3>Never blur guardrails and history.</h3> <code>crossmem guardrails .</code> prints the repo's authoritative instruction files. Transcripts say what happened; guardrails say what must be. A transcript that contradicts a guardrail loses.</li>
+    <li><h3>Never touch secrets.</h3> No credential files, <code>*.env</code>, auth databases or <code>vault/</code> directories — and never echo a secret value into a brief.</li>
+    <li><h3>Never auto-pick a session</h3> when several are plausible.</li>
+  </ul>
+</section>
+
+<section id="layout">
+  <h2>What's in the skill</h2>
+  <p>Progressive disclosure — the routing table loads first, and a reference file is read only when that branch is taken.</p>
+  <table>
+    <tr><th>File</th><th>Holds</th></tr>
+    <tr><td><code>SKILL.md</code></td><td>routing table, the load hot path, guardrails vs. history, safety</td></tr>
+    <tr><td><code>references/persisting.md</code></td><td><code>crossmem update</code> and the committable <code>.crossmem/</code></td></tr>
+    <tr><td><code>references/portability.md</code></td><td><code>export</code>/<code>import</code> of <code>qa.jsonl</code> — training, RAG, moving machines</td></tr>
+    <tr><td><code>references/troubleshooting.md</code></td><td><code>scan</code>, <code>config</code>, env overrides, debug logging</td></tr>
+  </table>
+  <p><a href="https://github.com/muthuishere/crossmemcli/tree/main/skills/crossmem-loader">Read the skill source →</a></p>
+</section>
+</Base>
