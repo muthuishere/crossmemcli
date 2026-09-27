@@ -198,6 +198,18 @@ func (c *Client) storePaths(provider string, kind string) []string {
 			matches = []string{expanded}
 		}
 		for _, match := range matches {
+			// Stores often sit at the end of a symlink chain (a relocatable
+			// ~/.claude pointing at the real config dir, CLAUDE_CONFIG_DIR
+			// pointing at ~/.claude). os.Stat follows a symlinked root, but
+			// filepath.WalkDir does not descend it — a walk of the symlink
+			// itself yields just that one entry and every session in the
+			// store goes missing. Resolve the chain so the walk sees a real
+			// directory; roots that resolve to the same place deduplicate
+			// below, so the doubled ~/.claude and CLAUDE_CONFIG_DIR collapse
+			// into one.
+			if real, err := filepath.EvalSymlinks(match); err == nil && real != "" {
+				match = real
+			}
 			if seen[match] {
 				continue
 			}

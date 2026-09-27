@@ -82,15 +82,24 @@ func TestDevinDBHonorsEnvOverrides(t *testing.T) {
 	}
 	resetConfigForTest(t)
 
+	// storePaths resolves symlink chains (e.g. macOS /var -> /private/var), so
+	// both sides of every comparison are resolved the same way.
+	resolve := func(path string) string {
+		if real, err := filepath.EvalSymlinks(path); err == nil {
+			return real
+		}
+		return path
+	}
+
 	t.Setenv("DEVIN_HOME", home)
-	if got := defaultClient().devinDB(); got != filepath.Join(home, "cli", "sessions.db") {
-		t.Fatalf("DEVIN_HOME not honored: defaultClient().devinDB() = %q, want %q", got, filepath.Join(home, "cli", "sessions.db"))
+	if got, want := defaultClient().devinDB(), resolve(filepath.Join(home, "cli", "sessions.db")); got != want {
+		t.Fatalf("DEVIN_HOME not honored: defaultClient().devinDB() = %q, want %q", got, want)
 	}
 	// A direct DB path wins over the home-derived default; DEVIN_DB_PATH is
 	// listed before the DEVIN_HOME-derived candidates.
 	t.Setenv("DEVIN_DB_PATH", dbPath)
-	if got := defaultClient().devinDB(); got != dbPath {
-		t.Fatalf("DEVIN_DB_PATH not honored: defaultClient().devinDB() = %q, want %q", got, dbPath)
+	if got, want := defaultClient().devinDB(), resolve(dbPath); got != want {
+		t.Fatalf("DEVIN_DB_PATH not honored: defaultClient().devinDB() = %q, want %q", got, want)
 	}
 }
 
@@ -196,8 +205,15 @@ func TestConfigDirEnvVarsWin(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CODEX_HOME", dir)
-	if got := defaultClient().storePath("codex", "jsonl-sessions"); got != filepath.Join(dir, "sessions") {
-		t.Fatalf("storePath = %q, want the $CODEX_HOME sessions dir", got)
+	got := defaultClient().storePath("codex", "jsonl-sessions")
+	want := filepath.Join(dir, "sessions")
+	// storePaths resolves symlink chains (e.g. macOS /var -> /private/var), so
+	// the expected path is resolved the same way before the comparison.
+	if real, err := filepath.EvalSymlinks(want); err == nil {
+		want = real
+	}
+	if got != want {
+		t.Fatalf("storePath = %q, want the $CODEX_HOME sessions dir %q", got, want)
 	}
 }
 

@@ -97,7 +97,13 @@ func TestConfigOverrideRepointsDevinStore(t *testing.T) {
 	t.Setenv("CROSSMEM_CONFIG", writeConfig(t, `{"stores":{"devin:sqlite-sessions":"`+filepath.ToSlash(db)+`"}}`))
 	resetConfigForTest(t)
 
-	if got := defaultClient().devinDB(); got != db {
+	got := defaultClient().devinDB()
+	// storePaths resolves symlink chains (e.g. macOS /var -> /private/var), so
+	// the expected path is resolved the same way before the comparison.
+	if real, err := filepath.EvalSymlinks(db); err == nil {
+		db = real
+	}
+	if got != db {
 		t.Fatalf("defaultClient().devinDB() = %q, want %q", got, db)
 	}
 }

@@ -352,6 +352,41 @@ func TestClientListFollowsTranscriptSymlinks(t *testing.T) {
 	}
 }
 
+// A store may itself live at the end of a symlink chain: ~/.claude pointing at
+// the real config dir, CLAUDE_CONFIG_DIR pointing at ~/.claude. WalkDir does
+// not descend a symlinked root, so the store must resolve to a real directory
+// or every session inside it disappears from List and scan.
+func TestClientListDescendsSymlinkedStoreRoot(t *testing.T) {
+	realRoot := filepath.Join(t.TempDir(), "real", "projects")
+	mustWrite(t, filepath.Join(realRoot, "-work-repo", "s1.jsonl"),
+		`{"type":"user","message":{"content":"where did I stop"}}`+"\n")
+	link := filepath.Join(t.TempDir(), "link", "projects")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realRoot, link); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	fixtures := storesOnly(t, map[string]string{"claude:jsonl-projects": link})
+	fixtures.Stores["claude:jsonl-projects"] = append(fixtures.Stores["claude:jsonl-projects"], realRoot)
+	c, err := New(Options{Config: fixtures, CurrentSessionIDs: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := c.List(context.Background(), ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both candidates resolve to the same real directory: one session, not
+	// duplicates — and the ref must load.
+	if len(sessions) != 1 {
+		t.Fatalf("want 1 session from symlinked root, got %d: %#v", len(sessions), refsIn(sessions))
+	}
+	if _, err := c.Load(context.Background(), sessions[0].Ref, LoadSummary); err != nil {
+		t.Fatalf("Load(ref from symlinked root) = %v", err)
+	}
+}
+
 // Agents work in git worktrees, one per task. A worktree is a different path
 // but the same repository, so a session recorded in the main checkout holds the
 // context for work continuing in the worktree and must be offered there.
